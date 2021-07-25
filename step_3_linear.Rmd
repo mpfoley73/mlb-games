@@ -402,7 +402,34 @@ cle_tsibble_yrmo %>%
   geom_line(data = cle_tsibble_yrmo %>% filter(year(yrmo) >= 2011) %>% fill_gaps(), aes(y = game_hrs9)) +
   theme_light() +
   guides(color = guide_legend(title = "Forecast")) +
-  labs(title = "These simple forecast methods are useful benchmarks.",
+  labs(title = "Useful benchmarks.",
        subtitle = "Quarterly brick production.",
        x = NULL, y = NULL)
 ```
+
+For the modelin
+
+```{r warning=FALSE}
+# Train/test
+cle_train <- cle_tsibble_yrmo %>% filter(yrmo < yearmonth("3/1/2021")) %>% fill_gaps()
+cle_test <- cle_tsibble_yrmo %>% filter(yrmo >= yearmonth("3/1/2021")) %>% fill_gaps()
+
+# Train model
+cle_mdl <- cle_train %>%
+  fill_gaps() %>%
+  model(mdl_naive = SNAIVE(game_hrs9 ~ drift()))
+
+# Forecast
+cle_fc <- cle_mdl %>%
+  forecast(h = 120)
+
+cle_fc %>%
+  autoplot(color = "goldenrod") +
+  autolayer(cle_train, game_hrs9, color = "goldenrod") +
+  theme_light() +
+  theme(legend.position = "none") +
+  labs(title = "12-month seasonal naive forecast with drift",
+       caption = "Shaded area is 80%- and 90% confidence interval.",
+       x = NULL, y = "Hours per Game")
+```
+

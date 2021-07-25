@@ -9,7 +9,7 @@ library(glue)
 
 get_schedule_scores <- function(team, year) {
   u <- glue("https://www.baseball-reference.com/teams/{team}/{year}-schedule-scores.shtml")
-  u_raw <- httr::GET(u)
+  u_raw <- httr::GET(u)5
   u_char <- rawToChar(u_raw$content)
   u_tbl <- readHTMLTable(u_char, which = 1)
   
@@ -45,7 +45,8 @@ cle_games <- cle_games_raw %>%
     # from "[Weekday], Mmm d (#)", remove [Weekday] and (#) to make real date
     game_date = str_remove_all(date_str, "([:alpha:]*,)|(\\([:digit:]\\))"),
     game_date = mdy(paste(game_date, season)),
-    home_ind = factor(if_else(home_ind == "@", 0, 1)),
+    home_ind = factor(if_else(home_ind != "@", "Home", "Away")),
+    day_ind = factor(if_else(day_night == "D", "Day", "Night")),
     # new_games_back includes "+" when in first place, "Tied" when tied.
     new_games_back = case_when(
       new_games_back == "Tied" ~ "0",
@@ -72,7 +73,9 @@ cle_games <- cle_games_raw %>%
   ungroup() %>%
   # innings only populated if <> 9
   replace_na(list(innings = 9)) %>%
-  select(-c(boxscore, date_str, starts_with("new_"))) %>%
+  # outcome is W|L|T plus extra info like walk-off. Drop the extra info.
+  mutate(outcome = factor(str_sub(outcome, 1, 1))) %>%
+  select(-c(boxscore, date_str, starts_with("new_"), day_night)) %>%
   select(season:team, opponent, game_date:streak, doubleheader_game, everything()) 
 
 saveRDS(cle_games, "./cle_games.rds")
