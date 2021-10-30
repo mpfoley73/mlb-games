@@ -9,7 +9,7 @@ library(glue)
 
 get_schedule_scores <- function(team, year) {
   u <- glue("https://www.baseball-reference.com/teams/{team}/{year}-schedule-scores.shtml")
-  u_raw <- httr::GET(u)5
+  u_raw <- httr::GET(u)
   u_char <- rawToChar(u_raw$content)
   u_tbl <- readHTMLTable(u_char, which = 1)
   

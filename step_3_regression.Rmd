@@ -49,7 +49,7 @@ pretty_hm <- function(hrs) {
 cle_games <- readRDS("./cle_games.rds")
 ```
 
-The Baseball-Reference web site for the [2021 Cleveland Indians](https://www.baseball-reference.com/teams/CLE/2021.shtml) provides game-by-game results since the first season in 1901. This project is an investigation into the increase in game duration. Games today last nearly twice as long as they did in 1901. Baseball-Reference has a rich source of game features that might help explain trends in game time. In [step 1](https://github.com/mpfoley73/cleveland-mlb-games/blob/main/step_1_get_games.R) of this project I aggregated `r n_distinct(cle_games$season)` seasons of data sets into a single data frame, `cle_games`. Let's start with a brief look at the structure of the data. `r n_distinct(cle_games$season)` seasons comprising `r scales::comma(nrow(cle_games))` games. The `game_date` and `game_duration` columns will be important. A few others seem interesting too: `day_ind` (day or night game), which game of a `doubleheader_game` if applicable, `runs_scored` and `runs_allowed`, `innings`, and `attendance`.
+The Baseball-Reference web site for the [2021 Cleveland Indians](https://www.baseball-reference.com/teams/CLE/2021.shtml) provides game-by-game results since the first season in 1901. This project is an investigation into the increase in game duration. Games today last nearly twice as long as they did in 1901. Baseball-Reference has a rich source of game features that might help explain trends in game time. In [step 1](https://github.com/mpfoley73/cleveland-mlb-games/blob/main/step_1_get_games.R) of this project I aggregated 121 seasons of data sets into a single data frame, `cle_games`. Let's start with a brief look at the structure of the data. 120+ seasons comprising 18,740 games. The `game_date` and `game_duration` columns will be important. A few other seem interesting too: `day_ind` (day or night game), which game of a `doubleheader_game` if applicable, `runs_scored` and `runs_allowed`, `innings`, and `attendance`.
 
 ```{r}
 skimr::skim(cle_games)
@@ -57,7 +57,7 @@ skimr::skim(cle_games)
 
 The seven character fields are interesting to read for nostalgia's sake (e.g., Lenny Barker's [1981](https://www.baseball-reference.com/teams/CLE/1981-schedule-scores.shtml) no-hitter on May 15 was against the Blue Jays and the win brought our record to 16-8), but these features won't play a role in this analysis.
 
-The lone date field is `game_date`. That's going to be critical for trend analysis.
+The lone date field is `game_date`. That's going to be critical for a trend analysis.
 
 The factor fields are interesting. `day_ind` is either "Day" or "Night". Compared to lazy afternoons, evening games feel electric and I wonder if that translates into shorter games at night. `doubleheader_game` indicates which game of a doubleheader, if applicable. When I played, I felt like two hours of baking in the sun was plenty, but did I do anything to hasten along a doubleheader? 
 
@@ -231,11 +231,9 @@ cle_tsibble %>%
 max_avg <- cle_tsibble_yr %>% slice_max(order_by = game_hrs9) 
 max_hrs <- floor(max_avg %>% pull(game_hrs9))
 max_mins <- floor((max_avg %>% pull(game_hrs9) - max_hrs) * 60)
-hrs_2021 <- floor(cle_tsibble_yr %>% filter(yr == 2021) %>% pull(game_hrs9))
-mins_2021 <- floor((cle_tsibble_yr %>% filter(yr == 2021) %>% pull(game_hrs9) - max_hrs) * 60)
 ```
 
-If it seems like Tribe games are taking longer to complete, you are right. The annual average game duration has been increasing since 2003. Prior to 2003, it had briefly fallen from an all-time high of `r glue("{max_hrs} hours {max_mins} minutes")` in `r max_avg %>% pull(yr)`. Early in the 1900s, games took a little over an hour and a half, but were increasing and by 1920 game times had climbed over two hours. From 1921 to 1945 game times were steady at about two hours, but began to climb again after WWII, reaching two and half hours by 1955. Game times stabilized at 2.5 hours from 1955 to 1975, before rising again. The average Tribe game time in 2021 was `r glue("{hrs_2021} hours {mins_2021} minutes")`.
+If it seems like Tribe games are taking longer to complete, you are right. The annual average game duration has been increasing since 2003. Prior to 2003, it had briefly fallen from an all-time high of `r glue("{max_hrs} hours {max_mins} minutes")` in `r max_avg %>% pull(yr)`. The earliest games took a little over an hour and a half, but by 1920 game times had climbed over two hours. From 1921 to 1945 game times were steady, but began to climb again after WWII. From 1955 to 1975, game time were again steady, lasting a little over 2.5 hours. Then they began to rise again.
 
 ```{r}
 cle_tsibble_yr %>%
@@ -328,7 +326,7 @@ day_night %>%
        caption = "source: www.baseball-reference.com.")
 ```
 
-I'm curious about the dip in game duration between 2000 and 2003. Game duration reached its peak at `r cle_tsibble_yr %>% filter(yr == 2000) %>% pull(game_hrs9) %>% pretty_hm()` per game in 2000. Then it underwent a brief period of decline, falling to `r cle_tsibble_yr %>% filter(yr == 2003) %>% pull(game_hrs9) %>% pretty_hm()` in 2003. It climbed back to `r cle_tsibble_yr %>% filter(yr == 2021) %>% pull(game_hrs9) %>% pretty_hm()` in 2021. I wonder if the reduction in offense after the steroid era is related. Below is the trend of average game times with total runs scored. They both plummeted over that three year period, but they've been moving in opposite directions since 2010. 
+I'm curious about the dip in game duration between 2000 and 2003. Game duration reached its peak at `r cle_tsibble_yr %>% filter(yr == 2000) %>% pull(game_hrs9) %>% pretty_hm()` per game in 2000. Then it underwent a brief period of decline, falling to `r cle_tsibble_yr %>% filter(yr == 2003) %>% pull(game_hrs9) %>% pretty_hm()`. As of this writing in early July 2021 it is `r cle_tsibble_yr %>% filter(yr == 2021) %>% pull(game_hrs9) %>% pretty_hm()`. I wonder if the reduction in offense after the steroid era is related. Below is the trend of average game times with total runs scored. They both plummeted over that three year period, but they've been moving in opposite directions since 2010. 
 
 ```{r}
 cle_tsibble_yr %>%
@@ -343,8 +341,6 @@ cle_tsibble_yr %>%
   scale_x_continuous(breaks = seq(1900, 2030, 10)) +
   theme_light() +
   theme_mlb +
-  theme(axis.text.y.left = element_text(color = cle_colors["red"]),
-        axis.title.y.left = element_text(color = cle_colors["red"])) +
   labs(x = NULL, y = "Hours", color = NULL, fill = NULL,
        title = "Game times fell after the steroid era.",
        subtitle = "Cleveland Indians average game duration, runs per game.",
@@ -371,53 +367,69 @@ ggplot() +
   geom_line(data = cle_tsibble_yrmo,
             aes(x = month(yrmo, label = TRUE, abbr = TRUE), y = game_hrs9,
                 group = factor(year(yrmo)), color = year(yrmo)),
-            show.legend = TRUE, alpha = 0.2) +
-  scale_color_gradient(low = all_colors[6], high = all_colors[2]) +
+            show.legend = FALSE, alpha = 0.2) +
   geom_line(data = cle_tsibble_mmm,
             aes(x = month(mmm, label = TRUE, abbr = TRUE), y = game_hrs9,
                 group = factor(year(mmm))), 
             alpha = 0.8) +
-  scale_y_continuous(limits = c(0, NA)) +
   theme_light() +
-  theme(axis.text.x = element_text(angle = 0, vjust = 0.25)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.25)) +
   labs(title = "Game duration falls slightly within a season.",
-       subtitle = "Average game duration by month of season. Bold line is average.", 
-       x = NULL, y = "Hours", color = NULL,
+       subtitle = "Average game duration by month of season.", 
+       x = NULL, y = NULL,
        caption = "source: www.baseball-reference.com.") +
   theme_mlb
 ```
 
 ## Benchmark Forecasts
 
-This following sections will use time series analysis to forecast attendance. Some forecasting methods are extremely simple and surprisingly effective. Here are four. I'll keep them in mind as benchmarks to evaluate the more sophisticated methods. I denote a forecast value with the "hat" notation, $\hat{y}_{T+h|T}$. The subscript $T + h$ means forecasting $h$ periods beyond the observed time series $T$. $\hat{y}_{T+h|T}$ means an $h$ period forecast beyond $T$ based on data through period $T$.
+Some forecasting methods are extremely simple and surprisingly effective. Here are four.
 
-* The **average method** projects the historical average, $\hat{y}_{T+h|T} = \bar{y}.$ 
-* The **naive method** projects the last observation, $\hat{y}_{T+h|T} = y_T.$ 
-* The **seasonal naive method** projects the last seasonal observation, $\hat{y}_{T+h|T} = y_{T+h-m(k+1)}$. 
-
-The methods can include drift, a straight line from the first and last observation, $\hat{y}_{T+h|T} = y_T + h\left(\frac{y_T - y_1}{T-1}\right).$
+The **average method** projects the historical average, $\hat{y}_{T+h|T} = \bar{y}.$ The **naive method** projects the last observation, $\hat{y}_{T+h|T} = y_T.$ The **seasonal naive method** projects the last seasonal observation, $\hat{y}_{T+h|T} = y_{T+h-m(k+1)}$. The methods can include drift, a straight line from the first and last observation, $\hat{y}_{T+h|T} = y_T + h\left(\frac{y_T - y_1}{T-1}\right).$
 
 ```{r warning=FALSE}
-cle_tsibble_yr %>%
-  # fill_gaps() %>%
+cle_tsibble_yrmo %>% 
+  filter(month(yrmo) %in% c(4:9) & year(yrmo) < 2021) %>%
+  fill_gaps() %>%
   model(Average = MEAN(game_hrs9),
-        Naive = NAIVE(game_hrs9),
+        Naive = NAIVE(game_hrs9 ~ drift()),
+        SNaive = SNAIVE(game_hrs9 ~ drift()),
         RW = RW(game_hrs9 ~ drift())) %>%
-  forecast(h = 10) %>%
-  ggplot(aes(x = yr)) +
+  forecast(h = 12) %>%
+  ggplot(aes(x = yrmo)) +
   geom_line(aes(y = .mean, color = .model)) +
-  geom_line(data = cle_tsibble_yr %>% filter(yr >= 1911) %>% fill_gaps(), aes(y = game_hrs9)) +
-  scale_y_continuous(limits = c(0, NA)) +
-  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
+  # autoplot(level = NULL) +
+  geom_line(data = cle_tsibble_yrmo %>% filter(year(yrmo) >= 2011) %>% fill_gaps(), aes(y = game_hrs9)) +
   theme_light() +
-  labs(title = "Three benchmark Tribe game duration forecasts.",
-       subtitle = "Average, naive, and random walk forecasts, h = 10 seasons.", 
-       x = NULL, y = "Hours", color = NULL,
-       caption = "source: www.baseball-reference.com.") +
-  theme_mlb +
-  guides(color = guide_legend(title = "Forecast"))
+  guides(color = guide_legend(title = "Forecast")) +
+  labs(title = "Useful benchmarks.",
+       subtitle = "Quarterly brick production.",
+       x = NULL, y = NULL)
 ```
 
-```{r}
-saveRDS(cle_tsibble_yr, "./cle_tsibble_yr.rds")
+For the modelin
+
+```{r warning=FALSE}
+# Train/test
+cle_train <- cle_tsibble_yrmo %>% filter(yrmo < yearmonth("3/1/2021")) %>% fill_gaps()
+cle_test <- cle_tsibble_yrmo %>% filter(yrmo >= yearmonth("3/1/2021")) %>% fill_gaps()
+
+# Train model
+cle_mdl <- cle_train %>%
+  fill_gaps() %>%
+  model(mdl_naive = SNAIVE(game_hrs9 ~ drift()))
+
+# Forecast
+cle_fc <- cle_mdl %>%
+  forecast(h = 120)
+
+cle_fc %>%
+  autoplot(color = "goldenrod") +
+  autolayer(cle_train, game_hrs9, color = "goldenrod") +
+  theme_light() +
+  theme(legend.position = "none") +
+  labs(title = "12-month seasonal naive forecast with drift",
+       caption = "Shaded area is 80%- and 90% confidence interval.",
+       x = NULL, y = "Hours per Game")
 ```
+
