@@ -1,0 +1,165 @@
+---
+title: "Cleveland Indians Game Duration"
+subtitle: "Exponential Smoothing"
+author: "Michael Foley"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    css: "style.css"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(tidyverse)
+library(lubridate)
+library(ggthemes)
+library(extrafont)
+library(fpp3)
+library(tsibble)
+library(fable)
+library(patchwork) # for arranging plots
+library(glue)
+library(png)
+library(gridGraphics)
+library(grid)
+
+cle_colors <- c("navy_blue" = "#0C2340", "red" = "#E31937")
+oak_colors <- c("gold" = "#efb21e", "kellygreen" = "#003831")
+vintage_colors <- c("#CBBCB1", "#AF6B58", "#556052", "#F2EFEA")
+all_colors <- c(cle_colors, oak_colors, vintage_colors)
+names(all_colors) <- NULL
+
+# Instead of typing this out for every ggplot
+theme_mlb <- theme(
+  text = element_text(size = 16, family = "Rockwell Condensed", color = cle_colors["navy_blue"]),
+  panel.grid.minor = element_blank())
+
+ball_png <- png::readPNG("baseball.png", native = TRUE)
+ball_grob <- grid::rasterGrob(ball_png, interpolate = FALSE)
+
+# Pretty h:m
+pretty_hm <- function(hrs) { 
+  str_sub(chron::times(hrs %/% 60 + hrs %% 60 / 60) / 24, 5, 8) 
+}
+```
+
+```{r data}
+# Get data from prior step
+cle_tsibble_yr <- readRDS("./cle_tsibble_yr.rds")
+```
+
+Exponential smoothing methods are weighted averages of past observations, with the weights decaying exponentially as the observations become increasingly remote. Exponential smoothing is a family of methods that vary by their trend and seasonal components. (See my [handbook](https://bookdown.org/connect/#/apps/67b5716a-6cdd-4892-935c-d6860310432b/access)).
+
+```{r}
+cle_tsibble_yr %>%
+  ggplot(aes(x = yr)) +
+  geom_line(aes(y = game_hrs9), size = 1, alpha = 0.6, color = cle_colors["red"]) +
+  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
+  theme_light() +
+  theme_mlb +
+  labs(x = NULL, y = "Hours", color = NULL, fill = NULL,
+       title = "Game duration updward trend.",
+       subtitle = "Cleveland Indians average game duration, runs per game.",
+       caption = "source: www.baseball-reference.com.")
+```
+
+## Fit Model
+
+A good first start is to allow the algorithm to select which model among the family of 18 smoothing models is optimal.
+
+```{r warning=FALSE}
+mdl_ets <- cle_tsibble_yr %>%
+  filter(yr >= 1903) %>%
+  model(ETS(game_hrs9))
+
+mdl_ets %>% report()
+```
+
+ETS chose Holt's linear method. 
+
+$$
+\begin{align}
+\hat{y}_{t+h|t} &= l_t + hb_t \\
+l_t &= \alpha y_t + (1 - \alpha)(l_{t-1} + hb_{t-1}) \\
+b_t &= \beta^*(l_t - l_{t-1}) + (1 - \beta^*)b_{t-1}
+\end{align}
+$$
+
+The first equation says the estimated value *h* periods ahead of the last observed value at time *t* is equal to a a level value $l_t$ at *t* plus *h* times the slope at time *t*, $b_t$. The second and third equations describe how the level $l_t$ and slope $b_t$ change as a function of the level and slope at prior steps in the series. 
+$\alpha$ and $\beta$ are weighting parameters ranging from 0 to 1 that weight remote values by proximity to the forecasted value (e.g., an $\alpha$ close to one would weight the most recent value almost completely and neglect older values. An $\alpha$ close to 0 would weight all values equally). The model estimated $\alpha$ = `r mdl_ets %>% tidy() %>% filter(term == "alpha") %>% pull(estimate) %>% scales::number(accuracy = .001)`, a moderate value that puts about 98% of the weight in the last 3 observations. The model estimated $\beta$ = `r mdl_ets %>% tidy() %>% filter(term == "beta") %>% pull(estimate) %>% scales::number(accuracy = .0001)`, a very small number indicating the slope does not change very often. The other two parameters estimated in the model are the level and slope at time 0 (year 1903). The model estimated $l_0$ = `r mdl_ets %>% tidy() %>% filter(term == "l[0]") %>% pull(estimate) %>% scales::number(accuracy = .001)` and $b_0$ = `r mdl_ets %>% tidy() %>% filter(term == "b[0]") %>% pull(estimate) %>% scales::number(accuracy = .001)`.
+
+The modele has a mean squared error MSE of `r mdl_ets %>% broom::glance() %>% pull("MSE") %>% scales::comma(accuracy = .001)` hours. The fitted to actuals plot has a good linear relationship.
+
+```{r}
+p1 <- augment(mdl_ets) %>%
+  ggplot(aes(x = yr)) +
+  geom_line(aes(y = game_hrs9), color = "dark gray", size = 1) +
+  geom_line(aes(y = .fitted), color = "goldenrod", size = 1) +
+  theme_light() +
+  labs(subtitle = "Time series")
+p2 <- augment(mdl_ets) %>%
+  ggplot(aes(x = game_hrs9, y = .fitted)) +
+  geom_point(color = "goldenrod", size = 1) +
+  geom_abline(intercept = 0, slope = 1, linetype = 2, size = 1, color = "dark gray") +
+  theme_light() +
+  labs(subtitle = "Fitted vs actuals")
+  
+p1 + p2 +
+  patchwork::plot_annotation(title = "Fitted values plots",
+                             subtitle = "ETS(A, A, N)")
+```
+
+## Model Evaluation
+
+Evaluate the regression model with diagnostic plots. Use `feasts::gg_tsresiduals()` from the tidyverts.
+
+```{r}
+gg_tsresiduals(mdl_ets)
+```
+
+The autocorrelation function plot (ACF) finds nosignificant spikes at the lags. The residuals vs time diagnostic plot revealed no heteroscedasticity. The histogram shows that the residuals are normally distributed. A second check on the homoscedastity assumption is a plot of the residuals against the fitted values. Again, there should be no pattern. This one shows a cyclic pattern.
+
+```{r}
+augment(mdl_ets) %>%
+  ggplot(aes(x = .fitted, y = .resid)) +
+  geom_point() +
+  labs(title = "Residuals vs Fitted Values",
+       y = "Residuals", x = "Fitted") +
+  theme_light()
+```
+
+## Predicting Values
+
+Use the model to forecast game durations over the next decade.
+
+```{r}
+fc_ets <- forecast(mdl_ets, h = 10)
+
+fc_ets_aug <- fc_ets %>%
+  mutate(mu = map_dbl(game_hrs9, ~pluck(.x, "mu")),
+         sigma = map_dbl(game_hrs9, ~pluck(.x, "sigma")),
+         ci_025 = qnorm(.025, mu, sigma),
+         ci_100 = qnorm(.100, mu, sigma),
+         ci_900 = qnorm(.900, mu, sigma),
+         ci_975 = qnorm(.975, mu, sigma)) %>%
+  select(yr, game_hrs9, mu, sigma, ci_025:ci_975)
+
+mdl_ets %>% 
+  augment() %>%
+  ggplot(aes(x = yr)) +
+  geom_line(aes(y = game_hrs9), color = "dark gray") +
+  geom_line(aes(y = .fitted), color = "goldenrod") +
+  geom_line(data = fc_ets_aug, aes(y = mu), color = "goldenrod", size = 1) +
+  geom_ribbon(data = fc_ets_aug, 
+              aes(ymin = ci_025, ymax = ci_975), 
+              fill = "goldenrod", alpha = .2) +
+  theme_light() +
+  scale_y_continuous(limits = c(0, NA)) +
+  scale_x_continuous(breaks = seq(1900, 2040, 10)) +
+  labs(title = "Holt linear model with 10 year forecast.",
+       caption = "Shaded area is 95% confidence interval.",
+       x = NULL, y = "Hours", color = NULL, fill = NULL)
+```
+
+The model predicts game durations to increase to `r fc_ets %>% filter(yr == 2031) %>% pull(.mean) %>% pretty_hm()` by 2031.
