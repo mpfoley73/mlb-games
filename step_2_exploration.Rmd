@@ -139,7 +139,7 @@ Curious about the attendance data. Do the peaks and troughs correlate with the t
 
 ```{r}
 scale_factor <- 50000
-cle_tsibble_yr %>%
+(step_2_fig1 <- cle_tsibble_yr %>%
   # group_by(yr) %>%
   # summarize(attend = mean(if_else(home_ind == "Home", attendance, NA_real_), na.rm = TRUE)) %>%
   mutate(attend = if_else(yr == 2020, 0, home_att)) %>%
@@ -174,6 +174,7 @@ cle_tsibble_yr %>%
   theme_mlb +
   theme(axis.text.y.left = element_text(color = cle_colors["red"]),
         axis.title.y.left = element_text(color = cle_colors["red"]))
+)
 ```
 
 As an aside, check out 1917 and 1918. Game attendance does not seem unusual those two years despite WWI and the influenza pandemic. The US entered WWI in Apr '17 and the war ended after the season concluded in '18. The 1918 influenza pandemic started in the spring, but seems to have really taken off around October. Baseball survived the war as an acceptable diversion from civic duty, and in fact patriotic elements were integrated into the games.
@@ -238,7 +239,7 @@ mins_2021 <- floor((cle_tsibble_yr %>% filter(yr == 2021) %>% pull(game_hrs9) - 
 If it seems like Tribe games are taking longer to complete, you are right. The annual average game duration has been increasing since 2003. Prior to 2003, it had briefly fallen from an all-time high of `r glue("{max_hrs} hours {max_mins} minutes")` in `r max_avg %>% pull(yr)`. Early in the 1900s, games took a little over an hour and a half, but were increasing and by 1920 game times had climbed over two hours. From 1921 to 1945 game times were steady at about two hours, but began to climb again after WWII, reaching two and half hours by 1955. Game times stabilized at 2.5 hours from 1955 to 1975, before rising again. The average Tribe game time in 2021 was `r glue("{hrs_2021} hours {mins_2021} minutes")`.
 
 ```{r}
-cle_tsibble_yr %>%
+(step_2_fig2 <- cle_tsibble_yr %>%
   ggplot(aes(x = yr, y = game_hrs9)) +
   annotate("rect", 
            xmin = c(1903, 1945, 1975, 2003), 
@@ -254,6 +255,7 @@ cle_tsibble_yr %>%
        title = "How long have we been sitting here?",
        subtitle = "Cleveland Indians average game duration, with periods of growth and stability.",
        caption = "source: www.baseball-reference.com.")
+)
 ```
 
 ```{r}
@@ -304,7 +306,7 @@ day_night <- cle_tsibble %>%
 How about day games? Until the late 1930s, all games were played in the afternoon. By the mid 1970s day games were primarily on weekends. While there might be a different dynamic to paying in the afternoon (*it's hot - let's get out of here!*), the data doesn't bear that out. The advent of night games is not associated with longer games.
 
 ```{r}
-day_night %>%
+(step_2_fig3 <- day_night %>%
   ggplot(aes(x = yr)) +
   annotate("rect", 
            xmin = c(1903, 1945, 1975, 2003), 
@@ -326,12 +328,13 @@ day_night %>%
        title = "Night games are more common, but they're not longer.",
        subtitle = "Cleveland Indians average game duration, with periods of growth and stability.",
        caption = "source: www.baseball-reference.com.")
+)
 ```
 
 I'm curious about the dip in game duration between 2000 and 2003. Game duration reached its peak at `r cle_tsibble_yr %>% filter(yr == 2000) %>% pull(game_hrs9) %>% pretty_hm()` per game in 2000. Then it underwent a brief period of decline, falling to `r cle_tsibble_yr %>% filter(yr == 2003) %>% pull(game_hrs9) %>% pretty_hm()` in 2003. It climbed back to `r cle_tsibble_yr %>% filter(yr == 2021) %>% pull(game_hrs9) %>% pretty_hm()` in 2021. I wonder if the reduction in offense after the steroid era is related. Below is the trend of average game times with total runs scored. They both plummeted over that three year period, but they've been moving in opposite directions since 2010. 
 
 ```{r}
-cle_tsibble_yr %>%
+(step_2_fig4 <- cle_tsibble_yr %>%
   ggplot(aes(x = yr)) +
   annotate("rect", xmin = 2000, xmax = 2003, ymin = 0, ymax = 3.5, fill = "lightgrey", alpha = 0.6) +
   geom_line(aes(y = game_hrs9), size = 1, alpha = 0.6, color = cle_colors["red"]) +
@@ -349,6 +352,7 @@ cle_tsibble_yr %>%
        title = "Game times fell after the steroid era.",
        subtitle = "Cleveland Indians average game duration, runs per game.",
        caption = "source: www.baseball-reference.com.")
+)
 ```
 
 Incidentally, compare the offense in the 1930s to the steroid era of the 1990s. And there's that year of the pitcher, 1968. But then 1972 does not look so hot. It should be noted that these are just Cleveland Indians games. There may be seasons when the Tribe had decent pitching, but no hitting, or vice-versa (or, sadly, neither).
@@ -420,4 +424,8 @@ cle_tsibble_yr %>%
 
 ```{r}
 saveRDS(cle_tsibble_yr, "./cle_tsibble_yr.rds")
+save(
+  step_2_fig1, step_2_fig2, step_2_fig3, step_2_fig4, scale_factor,
+  file = "step_2.RData"
+)
 ```

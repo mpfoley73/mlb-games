@@ -138,7 +138,7 @@ fc_arima_aug <- fc_arima %>%
          ci_975 = qnorm(.975, mu, sigma)) %>%
   select(yr, game_hrs9, mu, sigma, ci_025:ci_975)
 
-mdl_arima %>% 
+(step_5_fig1 <- mdl_arima %>% 
   augment() %>%
   ggplot(aes(x = yr)) +
   geom_line(aes(y = game_hrs9), color = "dark gray") +
@@ -152,7 +152,12 @@ mdl_arima %>%
   scale_x_continuous(breaks = seq(1900, 2040, 10)) +
   labs(title = "ARIMA(1, 1, 0) model with 10 year forecast.",
        caption = "Shaded area is 95% confidence interval.",
-       x = NULL, y = "Hours", color = NULL, fill = NULL)
+       x = NULL, y = "Hours", color = NULL, fill = NULL))
 ```
 
 The model predicts game durations to increase to `r fc_arima %>% filter(yr == 2031) %>% pull(.mean) %>% pretty_hm()` by 2031.
+
+```{r}
+save(step_5_fig1, file = "step_5.RData")
+```
+
