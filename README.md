@@ -1,6 +1,6 @@
 # cleveland-mlb-games
 
-Cleveland MLB (Indians) baseball game forecast
+Cleveland MLB (Guardians) game duration forecast.
 
 ## What the project does
 
