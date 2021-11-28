@@ -2,6 +2,15 @@
 
 Cleveland MLB (Guardians) game duration forecast.
 
+This project is composed of three parts:
+
+* Step 1: Get the data. [step_1_get_games.R](./step_1_get_games.R) is an R script that pulls the data.
+* Step 2: Explore the data. [step_2_exploration](https://mpfoley73.github.io/cleveland-mlb-games/step_2_exploration.html) is a web page that explores the data. I look at game duration, but also attendance and other features. The data is just too rich to stop at game duration!
+* Step 3: Forecast. Using time-series analysis techniques I project game durations over the next few seasons.
+  * [Linear Regression](https://mpfoley73.github.io/cleveland-mlb-games/step_3_linear.html),
+  * [Exponential Smoothing](https://mpfoley73.github.io/cleveland-mlb-games/step_4_ets.html), and 
+  * [ARIMA](https://mpfoley73.github.io/cleveland-mlb-games/step_5_arima.html)
+
 ## What the project does
 
 This project forecasts average game duration for the Cleveland Guardians using historical data. Major League Baseball games last nearly twice as long as they did in 1901. Using data from [Baseball-Reference.com](https://www.baseball-reference.com/), I compiled individual game statistics for the Cleveland Guardians all the way back to their inception in 1901.
