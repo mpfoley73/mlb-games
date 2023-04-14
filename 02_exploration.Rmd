@@ -64,51 +64,92 @@ skimr::skim(cle_pitching)
 I will use the **tsibble** package for time series analysis. To get an accurate measure of pace of play, I will standardize variables to per-nine-innings.
 
 ```{r echo=TRUE}
-# Standardize games to a 9-inning game
-cle_games_per9 <- cle_games %>%
-  mutate(game_hrs = as.duration(game_duration) / dhours(1),
-         game_hrs9 = game_hrs / innings * 9,
-         runs = runs_scored + runs_allowed,
-         runs9 = runs / innings * 9)
-
-# Create a time-series tibble (tsibble). 
-# key includes doubleheader game in order to index by game.
-cle_tsibble <- cle_games_per9 %>%
-  tsibble(key = c(doubleheader_game), index = game_date)
-
 # Batting and pitching are at the player/season granularity. Summarize to 
 # team/season.
-cle_batting_season <- cle_batting
+cle_batting_season <- cle_batting %>%
+  mutate(`1B` = H - (`2B` + `3B` + HR)) %>%
+  rename(yr = season) %>%
+  summarize(
+    .by = yr,
+    Age = weighted.mean(Age, G),
+    across(c(PA:SO, TB:`1B`), ~sum(.x, na.rm = TRUE))
+  ) %>%
+  mutate(
+    BA = H / AB,
+    OBP = (H + BB + HBP) / (AB + BB + HBP + SF),
+    SLG = (`1B` + 2*`2B` + 3*`3B` + 4*HR) / AB,
+    OPS = OBP + SLG
+  ) %>%
+  rename_with(~ paste0("batting_", .x), c(Age:OPS))
 
+cle_pitching_season <- cle_pitching %>%
+  rename(yr = season) %>%
+  summarize(
+    .by = yr,
+    Age = weighted.mean(Age, G),
+    across(c(CG:BF), ~sum(.x, na.rm = TRUE))
+  ) %>%
+  mutate(
+    ERA = 9 * ER / IP,
+    WHIP = (BB + H) / IP,
+    H9 = 9 * H / IP,
+    HR9 = 9 * HR / IP,
+    BB9 = 9 * BB / IP,
+    SO9 = 9 * SO / IP,
+    `SO_per_BB` = SO / BB
+  ) %>%
+  select(-c(IP)) %>%
+  rename_with(~ paste0("pitching_", .x), c(Age:SO_per_BB))
+
+# Standardize games to a 9-inning game
+cle_games_per9 <- cle_games %>%
+  mutate(
+    game_hrs = as.duration(game_duration) / dhours(1),
+    game_hrs9 = game_hrs / innings * 9,
+    runs = runs_scored + runs_allowed,
+    runs9 = runs / innings * 9
+  )
+
+# Create a time-series tibble (tsibble). 
+cle_batting_tsibble_yr <- tsibble(cle_batting_season, index = yr)
+cle_pitching_tsibble_yr <- tsibble(cle_pitching_season, index = yr)
+
+# key includes doubleheader game in order to index by game.
+cle_tsibble <- tsibble(cle_games_per9, key = c(doubleheader_game), index = game_date)
+
+# Summarize annual, monthly
+summarize_games <- function(dat) {
+  dat %>% summarize(
+    game_hrs9 = mean(game_hrs9, na.rm = TRUE),
+    home_att = mean(if_else(home_ind == "Home", attendance, NA_real_), na.rm = TRUE),
+    wins = sum(str_sub(outcome, 1, 1) == "W"),
+    losses = sum(str_sub(outcome, 1, 1) == "L"),
+    runs9 = mean(runs9)
+  )
+}
 # Annual summary
 cle_tsibble_yr <- cle_tsibble %>%
   index_by(yr = ~ year(.)) %>%
-  summarize(game_hrs9 = mean(game_hrs9, na.rm = TRUE),
-            home_att = mean(if_else(home_ind == "Home", attendance, NA_real_), na.rm = TRUE),
-            wins = sum(str_sub(outcome, 1, 1) == "W"),
-            losses = sum(str_sub(outcome, 1, 1) == "L"),
-            runs9 = mean(runs9)) 
+  summarize_games() %>%
+  inner_join(cle_batting_tsibble_yr, join_by(yr)) %>%
+  inner_join(cle_pitching_tsibble_yr, join_by(yr)) %>%
+  mutate(
+    winning_pct = wins / (wins + losses)
+  )
 
 # Monthly summary. Not sure how best to deal with missing values (Nov - Mar).
 cle_tsibble_yrmo <- cle_tsibble %>%
   index_by(yrmo = ~ yearmonth(.)) %>%
-  summarize(game_hrs9 = mean(game_hrs9, na.rm = TRUE),
-            home_att = mean(if_else(home_ind == "Home", attendance, NA_real_), na.rm = TRUE),
-            wins = sum(str_sub(outcome, 1, 1) == "W"),
-            losses = sum(str_sub(outcome, 1, 1) == "L"),
-            runs9 = mean(runs9))
+  summarize_games()
 
 cle_tsibble_mmm <- cle_tsibble %>%
   index_by(mmm = ~ month(.)) %>%
-  summarize(game_hrs9 = mean(game_hrs9, na.rm = TRUE),
-            home_att = mean(if_else(home_ind == "Home", attendance, NA_real_), na.rm = TRUE),
-            wins = sum(str_sub(outcome, 1, 1) == "W"),
-            losses = sum(str_sub(outcome, 1, 1) == "L"),
-            runs9 = mean(runs9)) %>%
+  summarize_games() %>%
   mutate(mmm = ym(paste0("9999-", mmm)))
 ```
 
-# 
+# Feature Exploration
+
 Most features are fully populated. The `attendance` data is somewhat spotty, primarily in the early years (and also in double-header games because attendance is only recorded for one game of a doubleheader). `game_duration` is also spotty in the early years.
 
 ```{r}
@@ -120,11 +161,20 @@ p1 <- cle_tsibble %>%
   ggplot(aes(x = yr, y = na_attendance)) + 
   geom_col(width = 1.0, fill = cle_colors["red"], alpha = 0.6) +
   scale_x_continuous(breaks = seq(1900, 2030, 10)) +
-  # theme_light() +
-  # theme_mlb +
+  annotate(
+    geom = "curve", x = 2012, y = 57, xend = 2017, yend = 47, 
+    curvature = .10, arrow = arrow(length = unit(2, "mm")),
+    color = cle_colors["navy_blue"]
+  ) +
+  annotate(
+    geom = "text", x = 2007, y = 68, label = "COVID", size = 3.5, 
+    family = "Rockwell Condensed", hjust = "left", color = cle_colors["navy_blue"]) +
+  coord_cartesian(ylim = c(0, 150)) +
   theme(axis.text.x = element_blank()) +
-  labs(title = "Games with no recorded attendance (doubleheader game-2 always 0).",
-       x = NULL, y = NULL, fill = "Doublehader Game")
+  labs(
+    subtitle = "Games with no recorded attendance.",
+    x = NULL, y = NULL, fill = "Doublehader Game"
+  )
 
 p2 <- cle_tsibble %>%
   index_by(yr = ~ year(.)) %>%
@@ -135,11 +185,15 @@ p2 <- cle_tsibble %>%
   scale_x_continuous(breaks = seq(1900, 2030, 10)) +
   # theme_light() +
   # theme_mlb +
-  labs(title = "Games with no recorded duration.",
-       caption = "source: www.baseball-reference.com.",
-       x = NULL, y = NULL)
+  labs(
+    subtitle = "Games with no recorded duration.",
+    x = NULL, y = NULL
+  )
 
-p1 / p2
+p1 / p2 + plot_annotation(
+  title = "Attendance and duration data is spotty prior to 1940",
+  caption = str_wrap("Attendance for game two of a double header is recorded as zero. Plot excludes game two. \nSource: www.baseball-reference.com.", 120)
+)
 ```
 
 Curious about the attendance data. Do the peaks and troughs correlate with the team's success? The answer is usually "yes", except for 1954. The Tribe won 111 games that year, but drew only around 20,000 per game, a 50% drop from their 1948 pennant-winning season. In a way, it was the 1948-49 seasons that were anomalous. The Tribe had never seen crowds like that before, and wouldn't again until 1995.

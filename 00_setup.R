@@ -9,6 +9,7 @@ theme_set(
   theme_light() +
     theme(
       text = element_text(size = 16, family = "Rockwell Condensed", color = cle_colors["navy_blue"]),
+      plot.caption = element_text(family = "Calibri Light", hjust = 0, size = 10),
       panel.grid.minor = element_blank()
     )
 )

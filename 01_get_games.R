@@ -39,9 +39,7 @@ get_batting_pitching <- function(team, year) {
 
 # This script writes results to .rds, then reads existing rds files to create
 # a single aggregate. No need to pull any season more than one time.
-season <- 1941:1960
-# season <- 2022:2022
-# season <- 2023:2023
+season <- 2023:2023
 names(season) <- season
 
 cle_games_raw <- map_df(season, ~get_schedule_scores("CLE", .x), .id = "season")
@@ -129,12 +127,12 @@ cle_pitching <- cle_pitching_raw %>%
 fn <- glue("cle_games_{season[1]}.rds")
 saveRDS(cle_games, file.path("data", fn))
 
-fn <- glue("cle_batting_{season[1]}_{season[length(season)]}.rds")
-# fn <- glue("cle_batting_{season[1]}.rds")
+# fn <- glue("cle_batting_{season[1]}_{season[length(season)]}.rds")
+fn <- glue("cle_batting_{season[1]}.rds")
 saveRDS(cle_batting, file.path("data", fn))
 
-fn <- glue("cle_pitching_{season[1]}_{season[length(season)]}.rds")
-# fn <- glue("cle_pitching_{season[1]}.rds")
+# fn <- glue("cle_pitching_{season[1]}_{season[length(season)]}.rds")
+fn <- glue("cle_pitching_{season[1]}.rds")
 saveRDS(cle_pitching, file.path("data", fn))
 
 # Combine the historical files into a single file.
