@@ -127,6 +127,7 @@ summarize_games <- function(dat) {
     runs9 = mean(runs9)
   )
 }
+
 # Annual summary
 cle_tsibble_yr <- cle_tsibble %>%
   index_by(yr = ~ year(.)) %>%
@@ -196,7 +197,25 @@ p1 / p2 + plot_annotation(
 )
 ```
 
-Curious about the attendance data. Do the peaks and troughs correlate with the team's success? The answer is usually "yes", except for 1954. The Tribe won 111 games that year, but drew only around 20,000 per game, a 50% drop from their 1948 pennant-winning season. In a way, it was the 1948-49 seasons that were anomalous. The Tribe had never seen crowds like that before, and wouldn't again until 1995.
+As with the attendance data, game duration data is also frequently unavailable prior to 1930.
+
+```{r}
+cle_tsibble %>%
+  index_by(yr = ~ year(.)) %>%
+  group_by(yr) %>%
+  summarize(na_duration = sum(if_else(is.na(game_duration), 1, 0))) %>%
+  ggplot(aes(x = yr, y = na_duration)) + 
+  geom_col(width = 1.0, fill = cle_colors["red"], alpha = 0.6) +
+  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
+  labs(title = "Game duration data is spotty until 1930.",
+       subtitle = "Games with no recorded duration.",
+       x = NULL, y = NULL,
+       caption = "source: www.baseball-reference.com.")
+```
+
+## Attendance
+
+Is attendance correlated with winning? The answer is usually "yes", except for 1954. The Tribe won 111 games that year, but drew 20,000 per game, a 50% drop from their 1948 pennant-winning season. In a way, it was the 1948-49 seasons that were anomalous. The Tribe had never seen crowds like that before, and wouldn't again until 1995.
 
 ```{r}
 scale_factor <- 50000
@@ -212,7 +231,7 @@ scale_factor <- 50000
              shape = 21, color = cle_colors["red"], fill = "white", size = 3, na.rm = TRUE) +
   # geom_vline(xintercept = c(1920, 1948, 1954, 1995, 1997, 2016), 
   #            color = cle_colors["navy_blue"], alpha = 0.2, size = 1.5) +
-  geom_hline(yintercept = 0.50 * scale_factor, linetype = 3, size = 1, color = cle_colors["navy_blue"]) +
+  geom_hline(yintercept = 0.50 * scale_factor, linetype = 3, linewidth = 1, color = cle_colors["navy_blue"]) +
   annotate(
     geom = "curve", x = 1960, y = 28000, xend = 1954, yend = 22000, 
     curvature = .3, arrow = arrow(length = unit(2, "mm")),
@@ -230,7 +249,7 @@ scale_factor <- 50000
   # theme_light() +
   labs(x = NULL, y = "Fans per Game",
        title = "Fans love a winner... usually.",
-       subtitle = "Annual attendance averages and Tribe's winning percentage.",
+       subtitle = "Annual attendance averages and Cleveland's winning percentage.",
        caption = "source: www.baseball-reference.com.") +
   # theme_mlb +
   theme(axis.text.y.left = element_text(color = cle_colors["red"]),
@@ -239,6 +258,8 @@ scale_factor <- 50000
 ```
 
 As an aside, check out 1917 and 1918. Game attendance does not seem unusual those two years despite WWI and the influenza pandemic. The US entered WWI in Apr '17 and the war ended after the season concluded in '18. The 1918 influenza pandemic started in the spring, but seems to have really taken off around October. Baseball survived the war as an acceptable diversion from civic duty, and in fact patriotic elements were integrated into the games.
+
+## Doubleheaders
 
 Doubleheaders were common through the mid-1960s. Let's take a closer look. Over 50% of baseball games in 1943 were played as part of a doubleheader. Doubleheaders have been relatively rare since the 1980s.
 
@@ -249,7 +270,7 @@ cle_tsibble %>%
   group_by(yr) %>%
   summarize(dh_pct = sum(is_dh) / n()) %>%
   ggplot(aes(x = yr, y = dh_pct)) +
-  geom_line(color = cle_colors["red"], size = 1.25, alpha = 0.6) +
+  geom_line(color = cle_colors["red"], linewidth = 1.25, alpha = 0.6) +
   annotation_custom(ball_grob, xmin = 1859, xmax = +Inf, ymin = .52, ymax = .55) +
   annotate(
     geom = "curve", x = 1953, y = .58, xend = 1946, yend = .56, 
@@ -261,24 +282,8 @@ cle_tsibble %>%
   scale_y_continuous(labels = scales::percent_format(accuracy = 1), 
                      breaks = seq(0, .6, .1), limits = c(0, .6)) +
   scale_x_continuous(breaks = seq(1900, 2030, 10)) +
-  labs(title = "Let's play one.",
-       subtitle = "Percent of Tribe games that were part of doubleheaders.",
-       x = NULL, y = NULL,
-       caption = "source: www.baseball-reference.com.")
-```
-
-As with the attendance data, game duration data is also frequently unavailable prior to 1930.
-
-```{r}
-cle_tsibble %>%
-  index_by(yr = ~ year(.)) %>%
-  group_by(yr) %>%
-  summarize(na_duration = sum(if_else(is.na(game_duration), 1, 0))) %>%
-  ggplot(aes(x = yr, y = na_duration)) + 
-  geom_col(width = 1.0, fill = cle_colors["red"], alpha = 0.6) +
-  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
-  labs(title = "Game duration data is spotty until 1930.",
-       subtitle = "Games with no recorded duration.",
+  labs(title = "Let's play one: double-headers are becoming less common",
+       subtitle = "Percent of games that were part of a doubleheader.",
        x = NULL, y = NULL,
        caption = "source: www.baseball-reference.com.")
 ```
@@ -405,7 +410,6 @@ I'm curious about the dip in game duration between 2000 and 2003. Game duration 
      plot.caption = element_text(family = "Calibri Light", size = 11)
    )
 )
-fonts()
 ```
 
 Incidentally, compare the offense in the 1930s to the steroid era of the 1990s. And there's that year of the pitcher, 1968. But then 1972 does not look so hot. It should be noted that these are just Cleveland Indians games. There may be seasons when the Tribe had decent pitching, but no hitting, or vice-versa (or, sadly, neither).
@@ -444,7 +448,7 @@ ggplot() +
 
 ## Benchmark Forecasts
 
-This following sections will use time series analysis to forecast attendance. Some forecasting methods are extremely simple and surprisingly effective. Here are four. I'll keep them in mind as benchmarks to evaluate the more sophisticated methods. I denote a forecast value with the "hat" notation, $\hat{y}_{T+h|T}$. The subscript $T + h$ means forecasting $h$ periods beyond the observed time series $T$. $\hat{y}_{T+h|T}$ means an $h$ period forecast beyond $T$ based on data through period $T$.
+The following sections will use time series analysis to forecast attendance. Some forecasting methods are extremely simple and surprisingly effective. I'll keep them in mind as benchmarks to evaluate the more sophisticated methods. I denote a forecast value with the "hat" notation, $\hat{y}_{T+h|T}$. The subscript $T + h$ means forecasting $h$ periods beyond the observed time series $T$. $\hat{y}_{T+h|T}$ means an $h$ period forecast beyond $T$ based on data through period $T$.
 
 * The **average method** projects the historical average, $\hat{y}_{T+h|T} = \bar{y}.$ 
 * The **naive method** projects the last observation, $\hat{y}_{T+h|T} = y_T.$ 
