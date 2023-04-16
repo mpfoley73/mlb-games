@@ -4,18 +4,19 @@ Cleveland MLB (Guardians) game duration forecast.
 
 This project is composed of three parts:
 
-* Step 1: Get the data. [01_get_games.R](https://github.com/mpfoley73/cleveland-mlb-games/blob/main/src/01_get_games.R) is an R script that pulls the data.
-* Step 2: Explore the data. [02_exploration](/cleveland-mlb-games/02_exploration.html) is a web page that explores the data. I look at game duration, but also attendance and other features. The data is just too rich to stop at game duration!
-* Step 3: Forecast. Using time-series analysis techniques I project game duration over the next few seasons.
-  * [Linear Regression](https://mpfoley73.github.io/cleveland-mlb-games/step_3_linear.html),
-  * [Exponential Smoothing](https://mpfoley73.github.io/cleveland-mlb-games/step_4_ets.html), and 
-  * [ARIMA](https://mpfoley73.github.io/cleveland-mlb-games/step_5_arima.html)
+1. Get the data. [01_get_games.R](https://github.com/mpfoley73/cleveland-mlb-games/blob/main/src/01_get_games.R) is an R script that pulls the data.
+2. Explore the data. [02_exploration](/cleveland-mlb-games/02_exploration.html) is a web page that explores the data. I look at game duration, but also attendance and other features. The data is just too rich to stop at game duration!
+3. Forecast. Using time-series analysis techniques I project game duration over the next few seasons.
+    - [Linear Regression](https://mpfoley73.github.io/cleveland-mlb-games/03a_linear_forecast.html),
+    - [Exponential Smoothing](https://mpfoley73.github.io/cleveland-mlb-games/03b_ets_forecast.html), and 
+    - [ARIMA](https://mpfoley73.github.io/cleveland-mlb-games/03c_arima_forecast
+    .html)
 
 ## What the project does
 
 This project forecasts average game duration for the Cleveland Guardians using historical data. Major League Baseball games last nearly twice as long as they did in 1901. Using data from [Baseball-Reference.com](https://www.baseball-reference.com/), I compiled individual game statistics for the Cleveland Guardians all the way back to their inception in 1901.
 
-![](/cleveland-mlb-games/assets/img01_duration_trend.png)
+![](../assets/img01_duration_trend.png)
 
 I used three time-series forecasting methods to project game durations into the next decade. The average Cleveland baseball game during the 2021 season was 3 hours and 5 minutes. My linear regression model predicted game times will increase to 3 hours 15 minutes by 2031. My exponential smoothing model and my ARIMA model predicted 3 hours 12 minutes.
 
