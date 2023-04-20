@@ -5,7 +5,13 @@ author: "Michael Foley"
 date: "`r Sys.Date()`"
 output: 
   html_document:
+    theme: united
+    highlight: tango
     css: "style.css"
+    toc: true
+    toc_depth: 2
+    toc_float: true
+    df_print: paged
 ---
 
 ```{r setup, include=FALSE}
@@ -13,9 +19,9 @@ knitr::opts_chunk$set(echo = FALSE)
 
 library(tidyverse)
 library(lubridate)
-library(ggthemes)
+library(scales)
 library(extrafont)
-library(fpp3)
+# library(fpp3)
 library(tsibble)
 library(fable)
 library(patchwork) # for arranging plots
@@ -25,70 +31,83 @@ library(gridGraphics)
 library(grid)
 
 source("00_setup.R")
-
-ball_png <- png::readPNG("baseball.png", native = TRUE)
+ball_png <- png::readPNG("../assets/baseball.png", native = TRUE)
 ball_grob <- grid::rasterGrob(ball_png, interpolate = FALSE)
 ```
 
 ```{r data}
 # Data from step 01.
-cle_games <- readRDS("data/cle_games.rds")
-cle_batting <- readRDS("data/cle_batting.rds")
-cle_pitching <- readRDS("data/cle_pitching.rds")
+cle_games <- readRDS("../data/cle_games.rds")
+cle_batting <- readRDS("../data/cle_batting.rds")
+cle_pitching <- readRDS("../data/cle_pitching.rds")
 ```
 
-This project investigates the increase in game duration and the effect of recent efforts to quicken the pace. Games today last nearly twice as long as they did in 1901. Baseball-Reference has a rich source of game features that might help explain trends in game time. The Baseball-Reference section for the [Cleveland Guardians](https://www.baseball-reference.com/teams/CLE/2023.shtml) lists game-by-game results since their first season in 1901. In [step 01](https://github.com/mpfoley73/cleveland-mlb-games/blob/main/01_get_games.R) of this project I aggregated `r n_distinct(cle_games$season)` seasons of data sets, including YTD for 2023, into data frame `cle_games`. `cle_games` is a `r scales::comma(nrow(cle_games))` x `r ncol(cle_games)` data frame with one row per game. I also downloaded player season summaries of hitting and pitching statistics. `cle_batting` is a `r scales::comma(nrow(cle_batting))` x `r ncol(cle_batting)` data frame and `cle_pitching` is a `r scales::comma(nrow(cle_pitching))` x `r ncol(cle_pitching)` data frame each with one row per season and player. This step explores the data sets.
+This project investigates the increase in game duration and the effect of recent efforts to quicken the pace. Games today last nearly twice as long as they did in 1901. Baseball-Reference has a rich source of game features that might help explain trends in game time. The Baseball-Reference section for the [Cleveland Guardians](https://www.baseball-reference.com/teams/CLE/2023.shtml) lists game-by-game results since their first season in 1901. [Step 01](https://github.com/mpfoley73/cleveland-mlb-games/blob/main/src/01_get_games.R) aggregated `r n_distinct(cle_games$season)` seasons of game summaries, including YTD for 2023, into `cle_games`, a `r comma(nrow(cle_games))` x `r ncol(cle_games)` data frame with one row per game. Step 01 also downloaded player season summaries for hitters (`cle_batting`, `r comma(nrow(cle_batting))` x `r ncol(cle_batting)`) and pitchers (`cle_pitching`, `r comma(nrow(cle_pitching))` x `r ncol(cle_pitching)`). This step explores the variable relationships with game duration, and engineers useful data transformations along the way. Main outputs:
 
-## The Data Sets
+- Summarize the annual player summaries of batting and pitching into annual _team-wide_ summaries.
+- Standardize variables into per-nine-innings.
+- Save to object `cle_tsibble_yr` in the data folder.
 
-For `cle_games`, columns `game_date` and `game_duration` are obviously going to be important. A few others may be useful too: `day_ind` (day or night game), which game of a `doubleheader_game` if applicable, `runs_scored` and `runs_allowed`, `innings`, and `attendance`. The seven character fields are interesting to read for nostalgia's sake (e.g., Lenny Barker's [1981](https://www.baseball-reference.com/teams/CLE/1981-schedule-scores.shtml) no-hitter on May 15 was against the Blue Jays and the win brought our record to 16-8), but these features won't play a role in this analysis. The lone date field, `game_date`, might be useful in the trend analysis, but the emphasis will be on seasonal roll-ups. I wonder about `day_ind`. Compared to lazy afternoons, evening games feel electric and I wonder if that translates into shorter games. I also wonder about `doubleheader_game`. When I played, I felt like two hours of baking in the sun was plenty, but did I do anything to hasten along a doubleheader? 
+# The Data Sets {.tabset .tabset-fade .tabset-pills}
+
+[Game-by-game summaries](https://www.baseball-reference.com/teams/CLE/2023-schedule-scores.shtml), and [pitching and batting summaries](https://www.baseball-reference.com/teams/CLE/2023.shtml) are from Baseball Reference. The linked web pages have useful variable definitions. Potentially interesting game duration predictors:
+
+- `cle_games`: `game_date` (time of year), `day_ind` (day or night game), `doubleheader_game` (0 (not a double-header), 1, and 2), `runs_scored` + `runs_allowed`, and `innings`.
+
+- `cle_batting`: `PA` (plate appearances), `BB` and `SO` (don't have number of pitches, but walks and strikeouts probably take more pitches). Somewhat off subject, but `SB` and `CS` are related to the 2023 rule change that increased the base size. Also, eliminating the shift in 2023 might increase batting average, `BA`, and reduce the incentive to hit home runs, `BA`.
+
+- `cle_pitching`: `G` (sum to number of pitchers used in games), `BB` and `SO` (the defensive side of this effect).
+
+## Games
 
 ```{r}
 skimr::skim(cle_games)
 ```
 
-For `cle_batting`, I will be interested in how the 2023 rule change that increased the base size affected stolen bases, `SB` and `CS`. And did the restrictions on the shift increase batting average, `BA`, and reduce the incentive to hit home runs, `BA`?
+## Batting
 
 ```{r}
 skimr::skim(cle_batting)
 ```
 
-I don't anticipate using `cle_pitching` since everything related to game duration and the effects of rules on pace of game are already captured in the batting statistics. Here is the data set anyway.
+## Pitching
 
 ```{r}
 skimr::skim(cle_pitching)
 ```
 
-### Tsibbles
+# Combine and Standardize
 
-I will use the **tsibble** package for time series analysis. To get an accurate measure of pace of play, I will standardize variables to per-nine-innings.
+This section summarizes the three data sets into seasonal summaries and combines into a single data set. Most variables are related to the number of innings played, so this section standardizes the data per nine innings. I will use the **tsibble** package for time series analysis.
 
 ```{r echo=TRUE}
-# Batting and pitching are at the player/season granularity. Summarize to 
-# team/season.
-cle_batting_season <- cle_batting %>%
+# key includes doubleheader game in order to index by game.
+cle_games_ts <- cle_games %>%
+  mutate(
+    hrs = as.duration(game_duration) / dhours(1),
+    hrs_per_9 = hrs / innings * 9,
+    runs = runs_scored + runs_allowed,
+    runs_per_9 = runs / innings * 9
+  ) %>% 
+  tsibble(key = c(doubleheader_game), index = game_date)
+
+cle_batting_ts <- cle_batting %>%
+  # Singles are used in SLG calc.
   mutate(`1B` = H - (`2B` + `3B` + HR)) %>%
   rename(yr = season) %>%
-  summarize(
-    .by = yr,
-    Age = weighted.mean(Age, G),
-    across(c(PA:SO, TB:`1B`), ~sum(.x, na.rm = TRUE))
-  ) %>%
+  summarize(.by = yr, across(c(PA:SO, TB:`1B`), ~sum(.x, na.rm = TRUE))) %>%
   mutate(
     BA = H / AB,
     OBP = (H + BB + HBP) / (AB + BB + HBP + SF),
     SLG = (`1B` + 2*`2B` + 3*`3B` + 4*HR) / AB,
     OPS = OBP + SLG
   ) %>%
-  rename_with(~ paste0("batting_", .x), c(Age:OPS))
+  rename_with(~ paste0("batting_", .x), c(PA:OPS)) %>%
+  tsibble(index = yr)
 
-cle_pitching_season <- cle_pitching %>%
+cle_pitching_ts <- cle_pitching %>%
   rename(yr = season) %>%
-  summarize(
-    .by = yr,
-    Age = weighted.mean(Age, G),
-    across(c(CG:BF), ~sum(.x, na.rm = TRUE))
-  ) %>%
+  summarize(.by = yr, across(c(CG:BF), ~sum(.x, na.rm = TRUE))) %>%
   mutate(
     ERA = 9 * ER / IP,
     WHIP = (BB + H) / IP,
@@ -99,24 +118,52 @@ cle_pitching_season <- cle_pitching %>%
     `SO_per_BB` = SO / BB
   ) %>%
   select(-c(IP)) %>%
-  rename_with(~ paste0("pitching_", .x), c(Age:SO_per_BB))
+  rename_with(~ paste0("pitching_", .x), c(CG:SO_per_BB)) %>%
+  tsibble(index = yr)
+```
+
+`cle_games_ts` is at the game granularity. Summarize it to the season level.
+
+```{r echo=TRUE}
+summarize_games <- function(dat) {
+  dat %>% summarize(
+    mean_hrs = mean(hrs, na.rm = TRUE),
+    mean_hrs_per_9 = mean(hrs_per_9, na.rm = TRUE),
+    mean_home_att = mean(if_else(home_ind == "Home", attendance, NA_real_), na.rm = TRUE),
+    wins = sum(str_sub(outcome, 1, 1) == "W"),
+    losses = sum(str_sub(outcome, 1, 1) == "L"),
+    runs_per_9 = mean(runs_per_9),
+    innings = sum(innings)
+  )
+}
+
+cle_season_ts <- cle_games_ts %>%
+  index_by(yr = ~ year(.)) %>%
+  summarize_games() %>%
+  inner_join(cle_batting_ts, join_by(yr)) %>%
+  inner_join(cle_pitching_ts, join_by(yr)) %>%
+  mutate(
+    winning_pct = wins / (wins + losses),
+    batting_PA_per_9 = batting_PA / innings * 9,
+    
+  )
 
 # Standardize games to a 9-inning game
 cle_games_per9 <- cle_games %>%
   mutate(
-    game_hrs = as.duration(game_duration) / dhours(1),
-    game_hrs9 = game_hrs / innings * 9,
-    runs = runs_scored + runs_allowed,
-    runs9 = runs / innings * 9
+    ,
+    
   )
 
-# Create a time-series tibble (tsibble). 
-cle_batting_tsibble_yr <- tsibble(cle_batting_season, index = yr)
-cle_pitching_tsibble_yr <- tsibble(cle_pitching_season, index = yr)
 
-# key includes doubleheader game in order to index by game.
-cle_tsibble <- tsibble(cle_games_per9, key = c(doubleheader_game), index = game_date)
+```
 
+
+# Tsibbles
+
+ To get an accurate measure of pace of play, I will standardize variables to per-nine-innings.
+
+```{r echo=TRUE}
 # Summarize annual, monthly
 summarize_games <- function(dat) {
   dat %>% summarize(
@@ -149,7 +196,7 @@ cle_tsibble_mmm <- cle_tsibble %>%
   mutate(mmm = ym(paste0("9999-", mmm)))
 ```
 
-# Feature Exploration
+## Feature Exploration
 
 Most features are fully populated. The `attendance` data is somewhat spotty, primarily in the early years (and also in double-header games because attendance is only recorded for one game of a doubleheader). `game_duration` is also spotty in the early years.
 
@@ -213,7 +260,7 @@ cle_tsibble %>%
        caption = "source: www.baseball-reference.com.")
 ```
 
-## Attendance
+### Attendance
 
 Is attendance correlated with winning? The answer is usually "yes", except for 1954. The Tribe won 111 games that year, but drew 20,000 per game, a 50% drop from their 1948 pennant-winning season. In a way, it was the 1948-49 seasons that were anomalous. The Tribe had never seen crowds like that before, and wouldn't again until 1995.
 
@@ -259,7 +306,7 @@ scale_factor <- 50000
 
 As an aside, check out 1917 and 1918. Game attendance does not seem unusual those two years despite WWI and the influenza pandemic. The US entered WWI in Apr '17 and the war ended after the season concluded in '18. The 1918 influenza pandemic started in the spring, but seems to have really taken off around October. Baseball survived the war as an acceptable diversion from civic duty, and in fact patriotic elements were integrated into the games.
 
-## Doubleheaders
+### Doubleheaders
 
 Doubleheaders were common through the mid-1960s. Let's take a closer look. Over 50% of baseball games in 1943 were played as part of a doubleheader. Doubleheaders have been relatively rare since the 1980s.
 
@@ -275,7 +322,7 @@ cle_tsibble %>%
   annotate(
     geom = "curve", x = 1953, y = .58, xend = 1946, yend = .56, 
     curvature = .3, arrow = arrow(length = unit(2, "mm")),
-    color = cle_colors["navy_blue"], size = 1.25
+    color = cle_colors["navy_blue"], linewidth = 1.25
   ) +
   annotate("text", x = 1955, y = .58, label = "51% in 1943!", size = 3, 
            hjust = "left", color = cle_colors["navy_blue"]) +
@@ -288,7 +335,7 @@ cle_tsibble %>%
        caption = "source: www.baseball-reference.com.")
 ```
 
-## Game Duration
+### Game Duration
 
 ```{r}
 max_avg <- cle_tsibble_yr %>% slice_max(order_by = game_hrs9) 
@@ -301,20 +348,25 @@ mins_2021 <- floor((cle_tsibble_yr %>% filter(yr == 2021) %>% pull(game_hrs9) - 
 If it seems like Tribe games are taking longer to complete, you are right. The annual average game duration has been increasing since 2003. Prior to 2003, it had briefly fallen from an all-time high of `r glue("{max_hrs} hours {max_mins} minutes")` in `r max_avg %>% pull(yr)`. Early in the 1900s, games took a little over an hour and a half, but were increasing and by 1920 game times had climbed over two hours. From 1921 to 1945 game times were steady at about two hours, but began to climb again after WWII, reaching two and half hours by 1955. Game times stabilized at 2.5 hours from 1955 to 1975, before rising again. The average Tribe game time in 2021 was `r glue("{hrs_2021} hours {mins_2021} minutes")`.
 
 ```{r}
+knot_yrs <- c(1903, 1945, 1978, 2003, 2023)
 (step_2_fig2 <- cle_tsibble_yr %>%
-  ggplot(aes(x = yr, y = game_hrs9)) +
-  annotate("rect", 
-           xmin = c(1903, 1945, 1975, 2003), 
-           xmax = c(1921, 1955, 2000, 2021), 
-           ymin = c(0, 0, 0, 0), ymax = c(3.5, 3.5, 3.5, 3.5), 
-           fill = "lightgrey", alpha = 0.6) +
-  geom_line(color = cle_colors["red"], size = 1) +
-  scale_y_continuous(limits = c(0, NA)) +
-  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
-  labs(x = NULL, y = "Hours",
-       title = "How long have we been sitting here?",
-       subtitle = "Cleveland Indians average game duration, with periods of growth and stability.",
-       caption = "source: www.baseball-reference.com.")
+   ggplot(aes(x = yr, y = game_hrs9)) +
+   annotate("rect", 
+            xmin = c(1903, 1945, 1975, 2003), 
+            xmax = c(1921, 1955, 2000, 2021), 
+            ymin = c(0, 0, 0, 0), ymax = c(3.5, 3.5, 3.5, 3.5), 
+            fill = "lightgrey", alpha = 0.6) +
+   geom_line(color = cle_colors["red"], size = 1) +
+   scale_y_continuous(limits = c(0, NA)) +
+   scale_x_continuous(breaks = seq(1900, 2030, 10)) +
+   geom_text(data = cle_tsibble_yr %>% filter(yr %in% c(1978, 2023)), aes(label = pretty_hm(game_hrs9)), 
+             nudge_y = -.15, size = 3, color = cle_colors["red"], hjust = 0) + 
+   geom_point(data = cle_tsibble_yr %>% filter(yr %in% c(1978, 2023)), 
+              color = cle_colors["red"], size = 2) + 
+   labs(x = NULL, y = "Hours",
+        title = "How long have we been sitting here?",
+        subtitle = "Cleveland Indians average game duration, with periods of growth and stability.",
+        caption = "source: www.baseball-reference.com.")
 )
 ```
 
@@ -414,7 +466,7 @@ I'm curious about the dip in game duration between 2000 and 2003. Game duration 
 
 Incidentally, compare the offense in the 1930s to the steroid era of the 1990s. And there's that year of the pitcher, 1968. But then 1972 does not look so hot. It should be noted that these are just Cleveland Indians games. There may be seasons when the Tribe had decent pitching, but no hitting, or vice-versa (or, sadly, neither).
 
-## Duration Trends
+### Duration Trends
 
 Average game duration does not appear to change much within seasons - it looks like it falls about .2 hours (12 minutes) over the course of the season. The apparent increase in March game times is an artifact of March games not occurring until 1998. 
 
@@ -446,7 +498,7 @@ ggplot() +
        caption = "source: www.baseball-reference.com.")
 ```
 
-## Benchmark Forecasts
+### Benchmark Forecasts
 
 The following sections will use time series analysis to forecast attendance. Some forecasting methods are extremely simple and surprisingly effective. I'll keep them in mind as benchmarks to evaluate the more sophisticated methods. I denote a forecast value with the "hat" notation, $\hat{y}_{T+h|T}$. The subscript $T + h$ means forecasting $h$ periods beyond the observed time series $T$. $\hat{y}_{T+h|T}$ means an $h$ period forecast beyond $T$ based on data through period $T$.
 
@@ -476,7 +528,7 @@ cle_tsibble_yr %>%
 ```
 
 ```{r}
-saveRDS(cle_tsibble_yr, "data/cle_tsibble_yr.rds")
+saveRDS(cle_tsibble_yr, "../data/cle_tsibble_yr.rds")
 # save(
 #   step_2_fig1, step_2_fig2, step_2_fig3, step_2_fig4, scale_factor,
 #   file = "step_2.RData"

@@ -50,11 +50,11 @@ colnames(cle_games_raw) <- c(
   "game_duration", "day_night", "attendance", "new_streak", "orig_sched", "cli"
 )
 
-cle_players_raw <- map(season, ~get_players("CLE", .x))
+cle_players_raw <- map(season, ~get_batting_pitching("CLE", .x))
 cle_batting_raw <- map(cle_players_raw, ~.$team_batting) %>% list_rbind(names_to = "season")
 cle_pitching_raw <- map(cle_players_raw, ~.$team_pitching) %>% list_rbind(names_to = "season")
 
-# Clean the data.
+# Clean the game summaries.
 cle_games <- cle_games_raw %>% 
   # filter out repeating header rows
   filter(game_no != "Gm#") %>%
@@ -106,7 +106,7 @@ cle_batting <- cle_batting_raw %>%
   # filter out repeating header rows
   filter(Rk != "Rk") %>%
   mutate(
-    # symbols appended to name: *:=lefty, #:=switch, ?:=unknown. Remove all.
+    # Remove the symbols appended to name (*:=lefty, #:=switch, ?:=unknown).
     Name = str_remove_all(Name, "(\\*)|(#)|(\\?)"),
   ) %>%
   mutate(across(c(season, Age:IBB), as.numeric)) %>%

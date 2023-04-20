@@ -20,33 +20,13 @@ library(tsibble)
 library(fable)
 library(patchwork) # for arranging plots
 library(glue)
-library(png)
-library(gridGraphics)
-library(grid)
 
-cle_colors <- c("navy_blue" = "#0C2340", "red" = "#E31937")
-oak_colors <- c("gold" = "#efb21e", "kellygreen" = "#003831")
-vintage_colors <- c("#CBBCB1", "#AF6B58", "#556052", "#F2EFEA")
-all_colors <- c(cle_colors, oak_colors, vintage_colors)
-names(all_colors) <- NULL
-
-# Instead of typing this out for every ggplot
-theme_mlb <- theme(
-  text = element_text(size = 16, family = "Rockwell Condensed", color = cle_colors["navy_blue"]),
-  panel.grid.minor = element_blank())
-
-ball_png <- png::readPNG("baseball.png", native = TRUE)
-ball_grob <- grid::rasterGrob(ball_png, interpolate = FALSE)
-
-# Pretty h:m
-pretty_hm <- function(hrs) { 
-  str_sub(chron::times(hrs %/% 60 + hrs %% 60 / 60) / 24, 5, 8) 
-}
+source("00_setup.R")
 ```
 
 ```{r data}
 # Get data from prior step
-cle_tsibble_yr <- readRDS("./cle_tsibble_yr.rds")
+cle_tsibble_yr <- readRDS("../data/cle_tsibble_yr.rds")
 ```
 
 A time series regression forecasts a time series as a linear relationship with the independent variables.
@@ -62,8 +42,6 @@ cle_tsibble_yr %>%
   geom_line(aes(y = runs9 / 5), linetype = 2, color = cle_colors["navy_blue"]) +
   scale_y_continuous(limits = c(0, NA), sec.axis = sec_axis(~ . * 5, name = "Runs")) +
   scale_x_continuous(breaks = seq(1900, 2030, 10)) +
-  theme_light() +
-  theme_mlb +
   theme(axis.text.y.left = element_text(color = cle_colors["red"]),
         axis.title.y.left = element_text(color = cle_colors["red"])) +
   labs(x = NULL, y = "Hours", color = NULL, fill = NULL,
@@ -81,12 +59,10 @@ cle_tsibble_yr %>%
   select(-c(home_att, wins, losses)) %>%
   cor() %>%
   ggcorrplot::ggcorrplot(type = "upper", lab = TRUE, lab_size = 3) +
-  theme_light() +
   labs(title = "Game duration is correlated with year, but not scoring.",
        subtitle = "Correlation plot of Tribe seasonal statistics.", 
        caption = "Source: www.baseball-reference.com.",
-       x = NULL, y = NULL) +
-  theme_mlb 
+       x = NULL, y = NULL)
 ```
 
 ## Fit Model
@@ -111,13 +87,11 @@ p1 <- augment(mdl_reg) %>%
   ggplot(aes(x = yr)) +
   geom_line(aes(y = game_hrs9), color = "dark gray", size = 1) +
   geom_line(aes(y = .fitted), color = "goldenrod", size = 1) +
-  theme_light() +
   labs(subtitle = "Time series")
 p2 <- augment(mdl_reg) %>%
   ggplot(aes(x = game_hrs9, y = .fitted)) +
   geom_point(color = "goldenrod", size = 1) +
   geom_abline(intercept = 0, slope = 1, linetype = 2, size = 1, color = "dark gray") +
-  theme_light() +
   labs(subtitle = "Fitted vs actuals")
   
 p1 + p2 +
@@ -151,7 +125,6 @@ cle_tsibble_yr %>%
   labs(title = "There is no relationship between residuals and individual regressors.",
        subtitle = "otherwise the relationship may be nonlinear.",
        x = NULL) +
-  theme_light() +
   ggthemes::scale_color_few()
 ```
 
@@ -163,8 +136,7 @@ augment(mdl_reg) %>%
   geom_point() +
   labs(title = "There is cyclic relationship between residuals and fitted values.",
        subtitle = "The response variable may require transformation.",
-       y = "Residuals", x = "Fitted") +
-  theme_light()
+       y = "Residuals", x = "Fitted")
 ```
 
 Let's try a non-linear option. If there are kinks in the response variable trend, you can use piecewise linear regression by defining the knots in the series. In the exploration phase, I identified knots at 1920, 1945, 1955, 1975, 2000, and 2003.
@@ -184,25 +156,26 @@ augment(mdl_reg_pls) %>%
   geom_point() +
   labs(title = "There is no relationship between residuals and fitted values.",
        subtitle = "The response variable requires no transformation.",
-       y = "Residuals", x = "Fitted") +
-  theme_light()
+       y = "Residuals", x = "Fitted")
 ```
 
 ## Predicting Values
 
 Use the model to forecast game durations over the next decade.
 
-```{r}
-fc_reg_pls <- forecast(mdl_reg_pls, h = 10)
+```{r warning=FALSE}
+fc_reg_pls <- forecast(mdl_reg_pls, h = 10, point_forecast = list(mu = mean))
 
 fc_reg_pls_aug <- fc_reg_pls %>%
-  mutate(mu = map_dbl(game_hrs9, ~pluck(.x, "mu")),
-         sigma = map_dbl(game_hrs9, ~pluck(.x, "sigma")),
-         ci_025 = qnorm(.025, mu, sigma),
-         ci_100 = qnorm(.100, mu, sigma),
-         ci_900 = qnorm(.900, mu, sigma),
-         ci_975 = qnorm(.975, mu, sigma)) %>%
-  select(yr, game_hrs9, mu, sigma, ci_025:ci_975)
+  mutate(
+    hilo95 = hilo(game_hrs9, .95),
+    ci_025 = map_dbl(hilo95, ~.x$lower),
+    ci_975 = map_dbl(hilo95, ~.x$upper),
+    hilo80 = hilo(game_hrs9, .80),
+    ci_10 = map_dbl(hilo80, ~.x$lower),
+    ci_90 = map_dbl(hilo80, ~.x$upper)
+  ) %>%
+  select(yr, game_hrs9, mu, ci_025, ci_975, ci_10, ci_90)
 
 mdl_reg_pls %>% 
   augment() %>%
@@ -213,7 +186,6 @@ mdl_reg_pls %>%
   geom_ribbon(data = fc_reg_pls_aug, 
               aes(ymin = ci_025, ymax = ci_975), 
               fill = "goldenrod", alpha = .2) +
-  theme_light() +
   scale_y_continuous(limits = c(0, NA)) +
   scale_x_continuous(breaks = seq(1900, 2040, 10)) +
   labs(title = "Piecewise linear model with 10 year forecast.",
@@ -221,4 +193,4 @@ mdl_reg_pls %>%
        x = NULL, y = "Hours", color = NULL, fill = NULL)
 ```
 
-The model predicts game durations to increase to `r fc_reg_pls %>% filter(yr == 2031) %>% pull(.mean) %>% pretty_hm()` by 2031.
+The model predicts game durations to increase to `r fc_reg_pls %>% filter(yr == 2031) %>% pull(mu) %>% pretty_hm()` by 2031.

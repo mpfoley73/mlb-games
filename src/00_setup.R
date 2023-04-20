@@ -1,10 +1,11 @@
+# Define theme colors for plots.
 cle_colors <- c("navy_blue" = "#0C2340", "red" = "#E31937")
 oak_colors <- c("gold" = "#efb21e", "kellygreen" = "#003831")
 vintage_colors <- c("#CBBCB1", "#AF6B58", "#556052", "#F2EFEA")
 all_colors <- c(cle_colors, oak_colors, vintage_colors)
 names(all_colors) <- NULL
 
-# Instead of typing this out for every ggplot
+# Instead of typing this out for every ggplot.
 theme_set(
   theme_light() +
     theme(
