@@ -37,8 +37,8 @@ get_batting_pitching <- function(team, year) {
   u_tbl
 }
 
-# This script writes results to .rds, then reads existing rds files to create
-# a single aggregate. No need to pull any season more than one time.
+# This script writes results to .rds for aggregation in later step. No need to
+# pull any season more than one time.
 season <- 2023:2023
 names(season) <- season
 
@@ -54,8 +54,34 @@ cle_players_raw <- map(season, ~get_batting_pitching("CLE", .x))
 cle_batting_raw <- map(cle_players_raw, ~.$team_batting) %>% list_rbind(names_to = "season")
 cle_pitching_raw <- map(cle_players_raw, ~.$team_pitching) %>% list_rbind(names_to = "season")
 
+# Write raw data sets to disk.
+if (length(season) > 1) {
+  dt_range <- glue("{season[1]}_{season[length(season)]}")
+} else {
+  dt_range <- glue("{season[1]}")
+}
+
+fn <- glue("cle_games_{dt_range}_raw.rds")
+saveRDS(cle_games_raw, file.path("data", fn))
+
+fn <- glue("cle_batting_{dt_range}_raw.rds")
+saveRDS(cle_batting_raw, file.path("data", fn))
+
+fn <- glue("cle_pitching_{dt_range}_raw.rds")
+saveRDS(cle_pitching_raw, file.path("data", fn))
+
+# Aggregate all the raw data sets into a single data frame and clean.
+fns <- list.files(path = "data", pattern = "^cle_games_.*_raw.rds$")
+cle_games_agg_raw <- map_df(fns, ~readRDS(file.path("data", .x)))
+
+fns <- list.files(path = "data", pattern = "^cle_batting_.*_raw.rds")
+cle_batting_agg_raw <- map_df(fns, ~readRDS(file.path("data", .x)))
+
+fns <- list.files(path = "data", pattern = "^cle_pitching_.*_raw.rds")
+cle_pitching_agg_raw <- map_df(fns, ~readRDS(file.path("data", .x)))
+
 # Clean the game summaries.
-cle_games <- cle_games_raw %>% 
+cle_games <- cle_games_agg_raw %>% 
   # filter out repeating header rows
   filter(game_no != "Gm#") %>%
   # filter out future games
@@ -89,20 +115,25 @@ cle_games <- cle_games_raw %>%
   group_by(season) %>%
   arrange(season, game_no) %>%
   mutate(
-    record = lag(new_record, 1, default = "0-0"),
-    rank = lag(new_rank, 1, default = 1),
-    games_back = lag(new_games_back, 1, default = 0),
-    streak = lag(new_streak, 1, default = 0)
+    old_record = lag(new_record, 1, default = "0-0"),
+    old_rank = lag(new_rank, 1, default = 1),
+    old_games_back = lag(new_games_back, 1, default = 0),
+    old_streak = lag(new_streak, 1, default = 0)
   ) %>%
   ungroup() %>%
+  relocate(starts_with("old_"), .after = 11) %>%
+  relocate(new_streak, .after = 18) %>% 
   # innings only populated if <> 9
   replace_na(list(innings = 9)) %>%
   # outcome is W|L|T plus extra info like walk-off. Drop the extra info.
   mutate(outcome = factor(str_sub(outcome, 1, 1))) %>%
-  select(-c(boxscore, date_str, starts_with("new_"), day_night)) %>%
-  select(season:team, opponent, game_date:streak, doubleheader_game, everything()) 
+  select(
+    season, game_no, game_date, opponent, outcome, runs_scored, runs_allowed, 
+    innings, game_duration, attendance, home_ind, day_ind, doubleheader_game,
+    starts_with("old_"), starts_with("new_"), winning_pitcher, losing_pitcher, save
+  )
 
-cle_batting <- cle_batting_raw %>% 
+cle_batting <- cle_batting_agg_raw %>% 
   # filter out repeating header rows
   filter(Rk != "Rk") %>%
   mutate(
@@ -112,7 +143,7 @@ cle_batting <- cle_batting_raw %>%
   mutate(across(c(season, Age:IBB), as.numeric)) %>%
   select(-Rk)
 
-cle_pitching <- cle_pitching_raw %>% 
+cle_pitching <- cle_pitching_agg_raw %>% 
   # filter out repeating header rows
   filter(Rk != "Rk") %>%
   mutate(
@@ -122,28 +153,9 @@ cle_pitching <- cle_pitching_raw %>%
   mutate(across(c(season, Age:SO9), as.numeric)) %>%
   select(-Rk)
 
-# Write data sets to disk.
-# fn <- glue("cle_games_{season[1]}_{season[length(season)]}.rds")
-fn <- glue("cle_games_{season[1]}.rds")
-saveRDS(cle_games, file.path("data", fn))
+# Save final data frames.
+saveRDS(cle_games, file.path("data", "cle_games.rds"))
 
-# fn <- glue("cle_batting_{season[1]}_{season[length(season)]}.rds")
-fn <- glue("cle_batting_{season[1]}.rds")
-saveRDS(cle_batting, file.path("data", fn))
+saveRDS(cle_batting, file.path("data", "cle_batting.rds"))
 
-# fn <- glue("cle_pitching_{season[1]}_{season[length(season)]}.rds")
-fn <- glue("cle_pitching_{season[1]}.rds")
-saveRDS(cle_pitching, file.path("data", fn))
-
-# Combine the historical files into a single file.
-fns <- list.files(path = "data", pattern = "^cle_games_[0-9]+.*.rds")
-cle_games_agg <- map_df(fns, ~readRDS(file.path("data", .x)))
-saveRDS(cle_games_agg, file.path("data", "cle_games.rds"))
-
-fns <- list.files(path = "data", pattern = "^cle_batting_[0-9]+.*.rds")
-cle_batting_agg <- map_df(fns, ~readRDS(file.path("data", .x)))
-saveRDS(cle_batting_agg, file.path("data", "cle_batting.rds"))
-
-fns <- list.files(path = "data", pattern = "^cle_pitching_[0-9]+.*.rds")
-cle_pitching_agg <- map_df(fns, ~readRDS(file.path("data", .x)))
-saveRDS(cle_pitching_agg, file.path("data", "cle_pitching.rds"))
+saveRDS(cle_pitching, file.path("data", "cle_pitching.rds"))
