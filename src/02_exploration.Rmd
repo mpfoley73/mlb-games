@@ -40,17 +40,18 @@ ball_grob <- grid::rasterGrob(ball_png, interpolate = FALSE)
 cle_games <- readRDS("../data/cle_games.rds")
 cle_batting <- readRDS("../data/cle_batting.rds")
 cle_pitching <- readRDS("../data/cle_pitching.rds")
+mlb_pace <- readRDS("../data/mlb_pace.rds")
 ```
 
-This project investigates the increase in game duration and the effect of recent efforts to quicken the pace. Games today last nearly twice as long as they did in 1901. Baseball-Reference has a rich source of game features that might help explain trends in game time. The Baseball-Reference section for the [Cleveland Guardians](https://www.baseball-reference.com/teams/CLE/2023.shtml) lists game-by-game results since their first season in 1901. [Step 01](https://github.com/mpfoley73/cleveland-mlb-games/blob/main/src/01_get_games.R) aggregated `r n_distinct(cle_games$season)` seasons of game summaries, including YTD for 2023, into `cle_games`, a `r comma(nrow(cle_games))` x `r ncol(cle_games)` data frame with one row per game. Step 01 also downloaded player season summaries for hitters (`cle_batting`, `r comma(nrow(cle_batting))` x `r ncol(cle_batting)`) and pitchers (`cle_pitching`, `r comma(nrow(cle_pitching))` x `r ncol(cle_pitching)`). Here in step 02, I prepare the data for further analysis by creating time-series tsibbles. Along the way I explore the variable relationships with game duration, and engineer useful data transformations along the way. Main outputs:
+This project investigates the increase in game duration and the effect of recent efforts to quicken the pace. Games today last nearly twice as long as they did in 1901. Baseball-Reference has a rich source of game features that might help explain trends in game time. The Baseball-Reference section for the [Cleveland Guardians](https://www.baseball-reference.com/teams/CLE/2023.shtml) lists game-by-game results since their first season in 1901. [Step 01](https://github.com/mpfoley73/cleveland-mlb-games/blob/main/src/01_get_games.R) aggregated `r n_distinct(cle_games$season)` seasons of game summaries, including YTD for 2023, into `cle_games`, a `r comma(nrow(cle_games))` x `r ncol(cle_games)` data frame with one row per game. Step 01 also downloaded player season summaries for hitters (`cle_batting`, `r comma(nrow(cle_batting))` x `r ncol(cle_batting)`) and pitchers (`cle_pitching`, `r comma(nrow(cle_pitching))` x `r ncol(cle_pitching)`). The MLB stats API provides more detailed statistics. However, it proved difficult to get just the Cleveland game stats, so I pulled MLB-wide seasonal summaries (one record per season) instead. Here in step 02, I prepare the data for further analysis by creating time-series tsibbles. Along the way I explore the variable relationships with game duration, and engineer useful data transformations. Main outputs:
 
-- Summarize the annual player summaries of batting and pitching into annual _team-wide_ summaries.
-- Standardize variables into per-nine-innings.
+- Summarize the annual Cleveland player summaries of batting and pitching into annual _team-wide_ summaries.
+- Standardize Cleveland variables into per-nine-innings.
 - Save to object `cle_season_ts` in the data folder.
 
 # The Data Sets {.tabset .tabset-fade .tabset-pills}
 
-The [game-by-game summaries](https://www.baseball-reference.com/teams/CLE/2023-schedule-scores.shtml), and [pitching and batting summaries](https://www.baseball-reference.com/teams/CLE/2023.shtml) produced in [Step 01](https://github.com/mpfoley73/cleveland-mlb-games/blob/main/src/01_get_games.R) are from Baseball Reference. The web pages for useful variable definitions. The data files are summarized in the following tabs. Potentially interesting game duration predictors include:
+The [game-by-game summaries](https://www.baseball-reference.com/teams/CLE/2023-schedule-scores.shtml), and [pitching and batting summaries](https://www.baseball-reference.com/teams/CLE/2023.shtml) produced in [Step 01 - BREF](https://github.com/mpfoley73/cleveland-mlb-games/blob/main/src/01_get_bref_data.R) are from Baseball Reference. The web pages are useful for variable definitions. The MLB summaries produced in [Step 01 - MLB](https://github.com/mpfoley73/cleveland-mlb-games/blob/main/src/01_get_mlb_data.R) are from the MLB stats API. The data files are summarized in the following tabs. Potentially interesting game duration predictors include:
 
 - `cle_games`: `game_date` (time of year), `day_ind` (day or night game), `doubleheader_game` (0 (not a double-header), 1, and 2), `runs_scored` + `runs_allowed`, and `innings`.
 
@@ -76,9 +77,16 @@ skimr::skim(cle_batting)
 skimr::skim(cle_pitching)
 ```
 
+## MLB
+
+```{r}
+skimr::skim(mlb_pace %>% select(-time_per_P))
+summary(mlb_pace$time_per_P)
+```
+
 # Combine and Standardize
 
-This section summarizes the three data sets into seasonal summaries and combines into a single data set. Most variables are related to the number of innings played, so this section standardizes the data per nine innings. I will use the **tsibble** package for time series analysis.
+This section summarizes the three Cleveland data sets into seasonal summaries and combines into a single data set. Most variables are related to the number of innings played, so this section standardizes the data per nine innings. I will use the **tsibble** package for time series analysis.
 
 ```{r echo=TRUE}
 # key includes doubleheader game in order to index by game.
@@ -136,7 +144,10 @@ summarize_games <- function(dat) {
     losses = sum(str_sub(outcome, 1, 1) == "L"),
     avg_runs_per_9 = mean(runs_per_9),
     innings = sum(innings),
-    place = last(new_rank)
+    place = last(new_rank),
+    games = n(),
+    home_games = sum(home_ind == "Home"),
+    away_games = sum(home_ind == "Away")
   )
 }
 
@@ -157,6 +168,17 @@ cle_season_ts <- cle_games_ts %>%
     batting_SO_per_9 = batting_SO / innings * 9
   ) %>%
   inner_join(cle_pitching_ts, join_by(yr))
+```
+
+The MLB data is already at the seasonal granularity. Define it as a tsibble.
+
+```{r}
+mlb_season_ts <- tsibble(mlb_pace, index = season) %>%
+  mutate(
+    hours_per_9 = as.duration(time_per_9) / dhours(1),
+    seconds_per_PA = as.duration(time_per_PA) / dseconds(1),
+    seconds_per_P = as.duration(time_per_P) / dseconds(1),
+  )
 ```
 
 # Data Coverage {.tabset .tabset-fade .tabset-pills}
@@ -234,20 +256,16 @@ Attendance data is spotty prior to 1940, so perhaps we should take the season av
 Attendance is generally correlated with winning, but something seems wrong with the two World Series years, 1948 and 1954. Average attendance in 1947, the first full season at Municipal Stadium, was 25,300. The Tribe finished 80-74 that year. The next season the Tribe went 97-58 and went on to win the World Series. Average attendance swelled to 40,300. Despite finishing 89-65 in 1949, attendance fell to 36,300, then to 26,700 in 1950. It continued to fall each season, reaching a low of 16,800 in 1953, despite 90+ wins each year. The 1954 season, with the gaudy 111-43 record only lifted attendance to 20,000 per game. It resumed its decline the next season. It briefly rebounded to 23,800 in 1959, but would not exceed 20,000 again until 1993.
 
 ```{r}
-scale_factor <- 50000
+SF <- 50000
 (step_2_fig1 <- cle_season_ts %>%
-  # group_by(yr) %>%
-  # summarize(attend = mean(if_else(home_ind == "Home", attendance, NA_real_), na.rm = TRUE)) %>%
   mutate(attend = if_else(yr == 2020, 0, avg_home_attendance)) %>%
   ggplot(aes(x = yr, y = attend)) +
-  geom_col(aes(y = 1 * scale_factor), fill = cle_colors["navy_blue"], width = 1, alpha = 0.2) +
-  geom_col(aes(y = wins / (wins + losses) * scale_factor), fill = cle_colors["navy_blue"], width = 1, alpha = 0.2) +
+  geom_col(aes(y = 1 * SF), fill = cle_colors["navy_blue"], width = 1, alpha = 0.2) +
+  geom_col(aes(y = wins / (wins + losses) * SF), fill = cle_colors["navy_blue"], width = 1, alpha = 0.2) +
   geom_line(color = cle_colors["red"], na.rm = TRUE, linewidth = 1) +
   geom_point(aes(y = if_else(yr %in% c(1920, 1948, 1954, 1995, 1997, 2016), attend, NA_real_)),
              shape = 21, color = cle_colors["red"], fill = "white", size = 3, na.rm = TRUE) +
-  # geom_vline(xintercept = c(1920, 1948, 1954, 1995, 1997, 2016), 
-  #            color = cle_colors["navy_blue"], alpha = 0.2, size = 1.5) +
-  geom_hline(yintercept = 0.50 * scale_factor, linetype = 3, linewidth = 1, color = cle_colors["navy_blue"]) +
+  geom_hline(yintercept = 0.50 * SF, linetype = 3, linewidth = 1, color = cle_colors["navy_blue"]) +
   annotate(
     geom = "curve", x = 1960, y = 28000, xend = 1954, yend = 22000, 
     curvature = .3, arrow = arrow(length = unit(2, "mm")),
@@ -258,186 +276,92 @@ scale_factor <- 50000
   scale_y_continuous(limits = c(0, NA), 
                      labels = scales::comma,
                      expand = c(0,0),
-                     sec.axis = sec_axis(trans = ~ .x / scale_factor,
+                     sec.axis = sec_axis(trans = ~ .x / SF,
                                          labels = scales::percent_format(),
                                          name = "Winning Percentage")) +
   scale_x_continuous(breaks = seq(1900, 2030, 10), expand = c(0,0)) +
-  # theme_light() +
   labs(x = NULL, y = "Fans per Game",
        title = "Fans love a winner... usually.",
        subtitle = "Annual attendance averages and Cleveland's winning percentage.",
        caption = "source: www.baseball-reference.com.") +
-  # theme_mlb +
-  theme(axis.text.y.left = element_text(color = cle_colors["red"]),
-        axis.title.y.left = element_text(color = cle_colors["red"]))
+  theme(
+    axis.text.y.left = element_text(color = cle_colors["red"]),
+    axis.title.y.left = element_text(color = cle_colors["red"], margin = margin(r = 5)),
+    axis.title.y.right = element_text(color = cle_colors["navy_blue"], margin = margin(l = 5))
+  )
 )
 ```
 
 As an aside, check out 1917 and 1918. Game attendance does not seem unusual those two years despite WWI and the influenza pandemic. The US entered WWI in Apr '17 and the war ended after the season concluded in '18. The 1918 influenza pandemic started in the spring, but seems to have really taken off around October. Baseball survived the war as an acceptable diversion from civic duty, and in fact patriotic elements were integrated into the games.
 
-### Doubleheaders
-
-Doubleheaders were common through the mid-1960s. Let's take a closer look. Over 50% of baseball games in 1943 were played as part of a doubleheader. Doubleheaders have been relatively rare since the 1980s.
+## Game Duration {.tabset}
 
 ```{r}
-cle_games_ts %>%
-  mutate(is_dh = if_else(doubleheader_game == 0, 0, 1)) %>%
-  index_by(yr = ~ year(.)) %>%
-  group_by(yr) %>%
-  summarize(dh_pct = sum(is_dh) / n()) %>%
-  ggplot(aes(x = yr, y = dh_pct)) +
-  geom_line(color = cle_colors["red"], linewidth = 1.25, alpha = 0.6) +
-  annotation_custom(ball_grob, xmin = 1859, xmax = +Inf, ymin = .52, ymax = .55) +
-  annotate(
-    geom = "curve", x = 1953, y = .58, xend = 1946, yend = .56, 
-    curvature = .3, arrow = arrow(length = unit(2, "mm")),
-    color = cle_colors["navy_blue"], linewidth = 1.25
-  ) +
-  annotate("text", x = 1955, y = .58, label = "51% in 1943!", size = 3, 
-           hjust = "left", color = cle_colors["navy_blue"]) +
-  scale_y_continuous(labels = scales::percent_format(accuracy = 1), 
-                     breaks = seq(0, .6, .1), limits = c(0, .6)) +
+max_avg <- cle_season_ts %>% slice_max(order_by = avg_hours_per_9)
+avg_2023 <- cle_season_ts %>% filter(yr == 2023)
+```
+
+Games typically lasted around two hours up to 1945. Then over the course of ten seasons game times increased to 2.5 hours. In the late 1970s games began increasing again, peaking at `r max_avg %>% pull(avg_hours_per_9) %>% pretty_hm(verbose = TRUE)` in `r max_avg %>% pull(yr)`. They dropped briefly before resuming their climb through 2021. Significant changes in 2023 appear to have halted the advance. Average Guardians game times in 2023 have been `r avg_2023 %>% pull(avg_hours_per_9) %>% pretty_hm(verbose = TRUE)` through `r avg_2023 %>% pull(games)` games.
+
+Average game duration does not appear to change much within seasons. It falls about .2 hours (12 minutes) over the course of the season. The apparent increase in March game times is an artifact of March games not occurring until 1998. 
+
+### By Year
+
+```{r}
+knot_yrs <- c(1913, 1944, 1955, 1978, 2000, 2003, 2021)
+
+model(mlb_season_ts, TSLM(hours_per_9 ~ trend(knots = knot_yrs))) %>%
+  augment() %>%
+  ggplot(aes(x = season)) +
+  geom_line(aes(y = hours_per_9), color = cle_colors["red"], linewidth = 1) +
+  geom_line(aes(y = .fitted), color = "black", linetype = 2, linewidth = .5) +
+  geom_text(data = mlb_season_ts %>% filter(season %in% c(1945, 2000, 2021, 2023)), 
+            aes(y = hours_per_9 + if_else(season == 2023, -.15, +.15), label = pretty_hm(hours_per_9)), 
+            size = 3, color = cle_colors["red"], hjust = 0) + 
+  geom_point(data = mlb_season_ts %>% filter(season %in% c(1945, 2000, 2021, 2023)), 
+             aes(y = hours_per_9),
+             color = cle_colors["red"], size = 2) +
   scale_x_continuous(breaks = seq(1900, 2030, 10)) +
-  labs(title = "Let's play one: double-headers are becoming less common",
-       subtitle = "Percent of games that were part of a doubleheader.",
-       x = NULL, y = NULL,
-       caption = "source: www.baseball-reference.com.")
+  scale_y_continuous(limits = c(0, NA), n.breaks = 4) +
+  coord_cartesian(xlim = c(1900, 2030), ylim = c(0, 3.5)) +
+  labs(
+    title = "How long have we been sitting here?",
+    subtitle = "MLB game duration trend.",
+    caption = "source: www.baseball-reference.com.",
+    x = NULL, y = "Hours"
+  )
 ```
 
-### Game Duration
+### CLE By Year
 
 ```{r}
-max_avg <- cle_season_ts %>% slice_max(order_by = avg_hours_per_9) 
-max_hrs <- floor(max_avg %>% pull(avg_hours_per_9))
-max_mins <- floor((max_avg %>% pull(avg_hours_per_9) - max_hrs) * 60)
-hrs_2021 <- floor(cle_season_ts %>% filter(yr == 2021) %>% pull(avg_hours_per_9))
-mins_2021 <- floor((cle_season_ts %>% filter(yr == 2021) %>% pull(avg_hours_per_9) - max_hrs) * 60)
-```
+knot_yrs <- c(1913, 1944, 1955, 1978, 2000, 2003, 2021)
 
-If it seems like Tribe games are taking longer to complete, you are right. The annual average game duration has been increasing since 2003. Prior to 2003, it had briefly fallen from an all-time high of `r glue("{max_hrs} hours {max_mins} minutes")` in `r max_avg %>% pull(yr)`. Early in the 1900s, games took a little over an hour and a half, but were increasing and by 1920 game times had climbed over two hours. From 1921 to 1945 game times were steady at about two hours, but began to climb again after WWII, reaching two and half hours by 1955. Game times stabilized at 2.5 hours from 1955 to 1975, before rising again. The average Tribe game time in 2021 was `r glue("{hrs_2021} hours {mins_2021} minutes")`.
+fmla_pls <- formula(avg_hours_per_9 ~ trend(knots = knot_yrs))
 
-```{r}
-knot_yrs <- c(1903, 1945, 1978, 2003, 2023)
-(step_2_fig2 <- cle_season_ts %>%
-   ggplot(aes(x = yr, y = avg_hours_per_9)) +
-   annotate("rect", 
-            xmin = c(1903, 1945, 1975, 2003), 
-            xmax = c(1921, 1955, 2000, 2021), 
-            ymin = c(0, 0, 0, 0), ymax = c(3.5, 3.5, 3.5, 3.5), 
-            fill = "lightgrey", alpha = 0.6) +
-   geom_line(color = cle_colors["red"], size = 1) +
-   scale_y_continuous(limits = c(0, NA)) +
-   scale_x_continuous(breaks = seq(1900, 2030, 10)) +
-   geom_text(data = cle_season_ts %>% filter(yr %in% c(1978, 2023)), aes(label = pretty_hm(avg_hours_per_9)), 
-             nudge_y = -.15, size = 3, color = cle_colors["red"], hjust = 0) + 
-   geom_point(data = cle_season_ts %>% filter(yr %in% c(1978, 2023)), 
-              color = cle_colors["red"], size = 2) + 
-   labs(x = NULL, y = "Hours",
-        title = "How long have we been sitting here?",
-        subtitle = "Cleveland Indians average game duration, with periods of growth and stability.",
-        caption = "source: www.baseball-reference.com.")
-)
-```
-
-```{r}
-double_header_effect <- cle_games_ts %>%
-  mutate(is_doubleheader = if_else(doubleheader_game == 0, "Single", "Twin Bill")) %>%
-  # average over the day (in case of doubleheaders)
-  index_by(yr = ~ year(.)) %>%
-  group_by(yr, is_doubleheader) %>%
-  summarize(hours_per_9 = mean(hours_per_9, na.rm = TRUE)) 
-
-double_header_effect_wide <- double_header_effect %>%
-  pivot_wider(names_from = is_doubleheader, values_from = hours_per_9) %>%
-  mutate(twin_diff = `Twin Bill` - Single)
-
-```
-
-Doubleheaders have become less common while game times have increased. Is there a negative correlation, perhaps a compensating effect? Let's print the same chart, but control for whether the game is part of a doubleheader. The answer is no, doubleheaders are irrelevant. The average doubleheader game is shorter by all of `r scales::comma(mean(double_header_effect_wide$twin_diff, na.rm = TRUE) * 60 * (-1), accuracy = 1)` minutes.
-
-```{r}
-double_header_effect %>%
-  ggplot(aes(x = yr, y = hours_per_9, color = is_doubleheader)) +
-  annotate("rect", 
-           xmin = c(1903, 1945, 1975, 2003), 
-           xmax = c(1921, 1955, 2000, 2021), 
-           ymin = c(0, 0, 0, 0), ymax = c(3.5, 3.5, 3.5, 3.5), 
-           fill = "lightgrey", alpha = 0.6) +
-  geom_line(size = 1) +
-  scale_y_continuous(limits = c(0, NA)) +
-  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
-  scale_color_manual(values = all_colors) +
-  labs(x = NULL, y = "Hours",
-       title = "Players don't rush through doubleheaders.",
-       subtitle = glue("Doubleheader games are shorter by only {scales::comma(mean(double_header_effect_wide$twin_diff, na.rm = TRUE) * 60 * (-1), accuracy = 1)} minutes on average."),
-       caption = "source: www.baseball-reference.com.",
-       color = NULL)
-```
-
-```{r}
-day_night <- cle_games_ts %>%
-  index_by(yr = ~ year(.)) %>%
-  group_by(yr, day_ind) %>%
-  summarize(hours_per_9 = mean(hours_per_9, na.rm = TRUE),
-            n = n())
-```
-
-How about day games? Until the late 1930s, all games were played in the afternoon. By the mid 1970s day games were primarily on weekends. While there might be a different dynamic to paying in the afternoon (*it's hot - let's get out of here!*), the data doesn't bear that out. The advent of night games is not associated with longer games.
-
-```{r}
-(step_2_fig3 <- day_night %>%
+model(cle_season_ts, TSLM(avg_hours_per_9 ~ trend(knots = knot_yrs))) %>%
+  augment() %>%
   ggplot(aes(x = yr)) +
-  annotate("rect", 
-           xmin = c(1903, 1945, 1975, 2003), 
-           xmax = c(1921, 1955, 2000, 2021), 
-           ymin = c(0, 0, 0, 0), ymax = c(3.5, 3.5, 3.5, 3.5), 
-           fill = "lightgrey", alpha = 0.6) +
-  geom_col(aes(y = n / 200, fill = day_ind), alpha = 0.2, width = 1.0) +
-  # geom_point(aes(y = game_hrs9, color = day_ind), size = .025) +
-  geom_line(aes(y = hours_per_9, color = day_ind), size = 1, alpha = 0.6) +
-  annotate("text", x = 1910, y = .58, label = "Count of games", size = 3, 
-           hjust = "left", color = cle_colors["navy_blue"], alpha = 0.8) +
-  scale_color_manual(values = all_colors) +
-  scale_fill_manual(values = all_colors) +
-  scale_y_continuous(limits = c(0, NA)) +
+  geom_line(aes(y = avg_hours_per_9), color = cle_colors["red"], linewidth = 1) +
+  geom_line(aes(y = .fitted), color = "black", linetype = 2, linewidth = .5) +
+  geom_text(data = cle_season_ts %>% filter(yr %in% c(1901, 2000, 2023)), 
+            aes(y = avg_hours_per_9 + if_else(yr == 2023, -.15, +.15), label = pretty_hm(avg_hours_per_9)), 
+            size = 3, color = cle_colors["red"], hjust = 0) + 
+  geom_point(data = cle_season_ts %>% filter(yr %in% c(1901, 2000, 2023)), 
+             aes(y = avg_hours_per_9),
+             color = cle_colors["red"], size = 2) +
   scale_x_continuous(breaks = seq(1900, 2030, 10)) +
-  labs(x = NULL, y = "Hours", color = NULL, fill = NULL,
-       title = "Night games are more common, but they're not longer.",
-       subtitle = "Cleveland Indians average game duration, with periods of growth and stability.",
-       caption = "source: www.baseball-reference.com.")
-)
+  scale_y_continuous(limits = c(0, NA), n.breaks = 4) +
+  coord_cartesian(xlim = c(1900, 2030), ylim = c(0, 3.5)) +
+  labs(
+    title = "How long have we been sitting here?",
+    subtitle = "Cleveland game duration trend.",
+    caption = "source: www.baseball-reference.com.",
+    x = NULL, y = "Hours"
+  )
 ```
 
-I'm curious about the dip in game duration between 2000 and 2003. Game duration reached its peak at `r cle_season_ts %>% filter(yr == 2000) %>% pull(avg_hours_per_9) %>% pretty_hm()` per game in 2000. Then it underwent a brief period of decline, falling to `r cle_season_ts %>% filter(yr == 2003) %>% pull(avg_hours_per_9) %>% pretty_hm()` in 2003. It climbed back to `r cle_season_ts %>% filter(yr == 2021) %>% pull(avg_hours_per_9) %>% pretty_hm()` in 2021. I wonder if the reduction in offense after the steroid era is related. Below is the trend of average game times with total runs scored. They both plummeted over that three year period, but they've been moving in opposite directions since 2010. 
-
-```{r}
-(step_2_fig4 <- cle_season_ts %>%
-  ggplot(aes(x = yr)) +
-  annotate("rect", xmin = 2000, xmax = 2003, ymin = 0, ymax = 3.5, fill = "lightgrey", alpha = 0.6) +
-  geom_line(aes(y = avg_hours_per_9), size = 1, alpha = 0.6, color = cle_colors["red"]) +
-  geom_col(aes(y = avg_runs_per_9/5), width = 1.0, fill = cle_colors["navy_blue"], alpha = 0.2) +
-  # geom_point(aes(y = game_hrs9, color = day_ind), size = .025) +
-  annotate("text", x = 1910, y = .58, label = "Runs per 9 innings", size = 3, 
-           hjust = "left", color = cle_colors["navy_blue"], alpha = 0.8) +
-  scale_y_continuous(limits = c(0, NA), sec.axis = sec_axis(~ . * 5, name = "Runs")) +
-  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
-  labs(x = NULL, y = "Hours", color = NULL, fill = NULL,
-       title = "Game times fell after the steroid era.",
-       subtitle = "Cleveland Indians average game duration, runs per game.",
-       caption = "source: www.baseball-reference.com.") +
-   theme(
-     axis.text.y.left = element_text(color = cle_colors["red"]),
-     axis.title.y.left = element_text(color = cle_colors["red"]),
-     plot.caption = element_text(family = "Calibri Light", size = 11)
-   )
-)
-```
-
-Incidentally, compare the offense in the 1930s to the steroid era of the 1990s. And there's that year of the pitcher, 1968. But then 1972 does not look so hot. It should be noted that these are just Cleveland Indians games. There may be seasons when the Tribe had decent pitching, but no hitting, or vice-versa (or, sadly, neither).
-
-### Duration Trends
-
-Average game duration does not appear to change much within seasons - it looks like it falls about .2 hours (12 minutes) over the course of the season. The apparent increase in March game times is an artifact of March games not occurring until 1998. 
+### By Month in Year
 
 ```{r warning=FALSE}
 cle_tsibble_yrmo <- cle_games_ts %>%
@@ -467,7 +391,170 @@ ggplot() +
        caption = "source: www.baseball-reference.com.")
 ```
 
-### Benchmark Forecasts
+## Doubleheaders {.tabset}
+
+```{r}
+double_header <- cle_games_ts %>%
+  mutate(doubleheader_ind = if_else(doubleheader_game == 0, "Single Game", "Doubleheader")) %>%
+  index_by(yr = ~ year(.)) %>%
+  group_by(yr, doubleheader_ind) %>%
+  summarize(hours_per_9 = mean(hours_per_9, na.rm = TRUE), n = n())
+
+double_header_effect <- double_header %>%
+  as_tibble() %>%
+  pivot_wider(id_cols = yr, names_from = doubleheader_ind, values_from = hours_per_9) %>%
+  mutate(twin_diff = `Doubleheader` - `Single Game`)
+```
+
+Prior to 1942, a few doubleheaders would be scheduled each season. There doesn't appear to be a pattern: it might be on a Tuesday, for instance. Sunday doubleheaders became common in 1942, either scheduled or as make-ups. In 1943, most Sundays were scheduled doubleheaders and over 50% of baseball games overall were part of a doubleheader. Scheduled doubleheaders, esp. Sundays, were common through 1978. After that, only two or three might be scheduled.
+
+Doubleheaders have become less common while game times have increased. Is there a negative correlation, perhaps a compensating effect? The answer is no, doubleheaders are irrelevant. The average doubleheader game is shorter by only `r scales::comma(mean(double_header_effect$twin_diff, na.rm = TRUE) * 60 * (-1), accuracy = 1)` minutes.
+
+```{r}
+SF <- 50 # scaling factor for sec.axis.
+double_header %>%
+  ggplot(aes(x = yr)) +
+  geom_col(aes(y = n / SF, fill = fct_rev(doubleheader_ind)), alpha = 0.2, width = 1.0) +
+  geom_line(aes(y = hours_per_9, color = fct_rev(doubleheader_ind)), linewidth = 1) +
+  scale_color_manual(values = all_colors) +
+  scale_fill_manual(values = all_colors) +
+  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
+  scale_y_continuous(limits = c(0, NA), n.breaks = 4,
+    sec.axis = sec_axis(trans = ~ .x * SF, labels = comma_format(), name = "Games Played")
+  ) +
+  coord_cartesian(xlim = c(1900, 2030), ylim = c(0, 3.5)) +
+  labs(x = NULL, y = "Hours", color = NULL, fill = NULL,
+       title = "Players don't rush through doubleheaders.",
+       subtitle = glue("Doubleheader games are shorter by only {scales::comma(mean(double_header_effect$twin_diff, na.rm = TRUE) * 60 * (-1), accuracy = 1)} minutes on average."),
+       caption = "source: www.baseball-reference.com.") +
+  theme(
+    legend.position = "top",
+    axis.title.y.right = element_text(margin = margin(l = 5))
+  )
+```
+
+## Night Games
+
+```{r}
+day_night <- cle_games_ts %>%
+  index_by(yr = ~ year(.)) %>%
+  group_by(yr, day_ind) %>%
+  summarize(hours_per_9 = mean(hours_per_9, na.rm = TRUE), n = n())
+```
+
+Until the late 1930s, all games were played in the afternoon. By the mid 1970s day games were primarily on weekends. While there might be a different dynamic to paying in the afternoon (*it's hot - let's get out of here!*), the data doesn't bear that out. The advent of night games is not associated with longer games.
+
+```{r}
+SF <- 50 # scaling factor for sec.axis.
+day_night %>%
+  ggplot(aes(x = yr)) +
+  geom_col(aes(y = n / SF, fill = day_ind), alpha = 0.2, width = 1.0) +
+  geom_line(aes(y = hours_per_9, color = day_ind), linewidth = 1) +
+  scale_color_manual(values = all_colors) +
+  scale_fill_manual(values = all_colors) +
+  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
+  scale_y_continuous(limits = c(0, NA), n.breaks = 4,
+    sec.axis = sec_axis(trans = ~ .x * SF, labels = comma_format(), name = "Games Played")
+  ) +
+  coord_cartesian(xlim = c(1900, 2030), ylim = c(0, 3.5)) +
+  labs(x = NULL, y = "Hours", color = NULL, fill = NULL,
+       title = "Night games are more common, but they're not longer.",
+       subtitle = "Cleveland Indians average game duration, with periods of growth and stability.",
+       caption = "source: www.baseball-reference.com.") +
+  theme(
+    legend.position = "top",
+    axis.title.y.right = element_text(margin = margin(l = 5))
+  )
+```
+
+## Runs
+
+I'm curious about the dip in game duration between 2000 and 2003. Game duration reached its peak at `r cle_season_ts %>% filter(yr == 2000) %>% pull(avg_hours_per_9) %>% pretty_hm()` per game in 2000. Then it underwent a brief period of decline, falling to `r cle_season_ts %>% filter(yr == 2003) %>% pull(avg_hours_per_9) %>% pretty_hm()` in 2003. It climbed back to `r cle_season_ts %>% filter(yr == 2021) %>% pull(avg_hours_per_9) %>% pretty_hm()` in 2021. I wonder if the reduction in offense after the steroid era is related. Below is the trend of average game times with total runs scored. They both plummeted over that three year period, but they've been moving in opposite directions since 2010. 
+
+```{r}
+SF <- 5 # scaling factor for sec.axis.
+cle_season_ts %>%
+  ggplot(aes(x = yr)) +
+  geom_line(aes(y = avg_hours_per_9), linewidth = 1, color = cle_colors["red"]) +
+  geom_col(aes(y = avg_runs_per_9 / SF), width = 1.0, fill = cle_colors["navy_blue"], alpha = 0.2) +
+  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
+  scale_y_continuous(limits = c(0, NA), n.breaks = 4,
+    sec.axis = sec_axis(trans = ~ .x * SF, labels = comma_format(), name = "Runs")
+  ) +
+  coord_cartesian(xlim = c(1900, 2030), ylim = c(0, 3.5)) +
+  labs(x = NULL, y = "Hours", color = NULL, fill = NULL,
+       title = "Game times fell after the steroid era.",
+       subtitle = "Cleveland average game duration vs runs scored.",
+       caption = "source: www.baseball-reference.com.") +
+   theme(
+     axis.text.y.left = element_text(color = cle_colors["red"]),
+     axis.title.y.left = element_text(color = cle_colors["red"]),
+     axis.title.y.right = element_text(color = cle_colors["navy_blue"], margin = margin(l = 5)),
+     plot.caption = element_text(family = "Calibri Light", size = 11)
+   )
+```
+
+Incidentally, compare the offense in the 1930s to the steroid era of the 1990s. And there's that year of the pitcher, 1968. But then 1972 does not look so hot. It should be noted that these are just Cleveland games. There may be seasons when the Tribe/Guards had decent pitching, but no hitting, or vice-versa (or, sadly, neither).
+
+## Plate Appearances
+
+I'm curious about the dip in game duration between 2000 and 2003. Game duration reached its peak at `r cle_season_ts %>% filter(yr == 2000) %>% pull(avg_hours_per_9) %>% pretty_hm()` per game in 2000. Then it underwent a brief period of decline, falling to `r cle_season_ts %>% filter(yr == 2003) %>% pull(avg_hours_per_9) %>% pretty_hm()` in 2003. It climbed back to `r cle_season_ts %>% filter(yr == 2021) %>% pull(avg_hours_per_9) %>% pretty_hm()` in 2021. I wonder if the reduction in offense after the steroid era is related. Below is the trend of average game times with total runs scored. They both plummeted over that three year period, but they've been moving in opposite directions since 2010. 
+
+```{r}
+SF <- 10
+cle_season_ts %>%
+  mutate(PA = batting_PA_per_9 + pitching_BF / innings * 9) %>%
+  ggplot(aes(x = yr)) +
+  geom_line(aes(y = avg_hours_per_9), linewidth = 1, color = cle_colors["red"]) +
+  geom_line(aes(y = PA / SF - 5), linewidth = 1, color = cle_colors["navy_blue"]) +
+  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
+  scale_y_continuous(limits = c(0, NA), n.breaks = 4,
+    sec.axis = sec_axis(trans = ~ (.x + 5) * SF, labels = comma_format(), name = "Plate Appearances")
+  ) +
+  coord_cartesian(xlim = c(1900, 2030), ylim = c(0, 3.5)) +
+  labs(x = NULL, y = "Hours", color = NULL, fill = NULL,
+       title = "Game times sometimes correlate with plate appearances.",
+       subtitle = "Cleveland average game duration vs plate appearances.",
+       caption = "source: www.baseball-reference.com.") +
+   theme(
+     axis.text.y.left = element_text(color = cle_colors["red"]),
+     axis.text.y.right = element_text(color = cle_colors["navy_blue"], margin = margin(2, 2, 2, 2)),
+     axis.title.y.left = element_text(color = cle_colors["red"]),
+     axis.title.y.right = element_text(color = cle_colors["navy_blue"], margin = margin(l = 8)),
+     plot.caption = element_text(family = "Calibri Light", size = 11),
+   )
+```
+
+## Pitchers per Game
+
+I'm curious about the dip in game duration between 2000 and 2003. Game duration reached its peak at `r cle_season_ts %>% filter(yr == 2000) %>% pull(avg_hours_per_9) %>% pretty_hm()` per game in 2000. Then it underwent a brief period of decline, falling to `r cle_season_ts %>% filter(yr == 2003) %>% pull(avg_hours_per_9) %>% pretty_hm()` in 2003. It climbed back to `r cle_season_ts %>% filter(yr == 2021) %>% pull(avg_hours_per_9) %>% pretty_hm()` in 2021. I wonder if the reduction in offense after the steroid era is related. Below is the trend of average game times with total runs scored. They both plummeted over that three year period, but they've been moving in opposite directions since 2010. 
+
+```{r}
+SF <- 5/3
+cle_season_ts %>%
+  mutate(P = pitching_G / games) %>%
+  ggplot(aes(x = yr)) +
+  geom_line(aes(y = avg_hours_per_9), linewidth = 1, color = cle_colors["red"]) +
+  geom_line(aes(y = P / SF - 0), linewidth = 1, color = cle_colors["navy_blue"]) +
+  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
+  scale_y_continuous(limits = c(0, NA), n.breaks = 4,
+    sec.axis = sec_axis(trans = ~ (.x + 0) * SF, labels = comma_format(), name = "Pitchers")
+  ) +
+  coord_cartesian(xlim = c(1900, 2030), ylim = c(0, 3.5)) +
+  labs(x = NULL, y = "Hours", color = NULL, fill = NULL,
+       title = "Game times sometimes correlate with number of pitchers.",
+       subtitle = "Cleveland average game duration vs Cleveland pitchers.",
+       caption = "source: www.baseball-reference.com.") +
+   theme(
+     axis.text.y.left = element_text(color = cle_colors["red"]),
+     axis.text.y.right = element_text(color = cle_colors["navy_blue"], margin = margin(2, 2, 2, 2)),
+     axis.title.y.left = element_text(color = cle_colors["red"]),
+     axis.title.y.right = element_text(color = cle_colors["navy_blue"], margin = margin(l = 8)),
+     plot.caption = element_text(family = "Calibri Light", size = 11),
+   )
+```
+
+## Benchmark Forecasts
 
 The following sections will use time series analysis to forecast attendance. Some forecasting methods are extremely simple and surprisingly effective. I'll keep them in mind as benchmarks to evaluate the more sophisticated methods. I denote a forecast value with the "hat" notation, $\hat{y}_{T+h|T}$. The subscript $T + h$ means forecasting $h$ periods beyond the observed time series $T$. $\hat{y}_{T+h|T}$ means an $h$ period forecast beyond $T$ based on data through period $T$.
 
@@ -498,10 +585,6 @@ cle_season_ts %>%
 
 ```{r}
 saveRDS(cle_season_ts, "../data/cle_season_ts.rds")
-# save(
-#   step_2_fig1, step_2_fig2, step_2_fig3, step_2_fig4, scale_factor,
-#   file = "step_2.RData"
-# )
 ```
 
 https://www.nyseconomicsassociation.org/wp-content/uploads/2022/06/nyer-sports-2020.pdf#page=24

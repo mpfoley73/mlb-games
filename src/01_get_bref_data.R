@@ -1,5 +1,9 @@
 ##
-## Scrape Attendance Data
+## Scrape data from Baseball Reference
+## www.baseball-reference.com
+##
+## Note: I am replacing most of this data with the MLB API data collected in 
+## 01_bet_mlb_data.R.
 ##
 
 library(XML)
@@ -7,12 +11,14 @@ library(tidyverse)
 library(lubridate)
 library(glue)
 
+bref_base_url <- "https://www.baseball-reference.com/teams/CLE"
+
 # There is one web page per team per year. These functions have a built-in
 # sleep time to comply with Baseball Reference's web scraping policy: 
 # https://www.sports-reference.com/bot-traffic.html. 
 # Policy currently limits traffic to 20/minute. Function set to 10/minute.
-get_schedule_scores <- function(team, year) {
-  u <- glue("https://www.baseball-reference.com/teams/{team}/{year}-schedule-scores.shtml")
+get_schedule_scores <- function(year) {
+  u <- glue("{bref_base_url}/{year}-schedule-scores.shtml")
   u_raw <- httr::GET(u)
   u_char <- rawToChar(u_raw$content)
   u_tbl <- readHTMLTable(u_char, which = 1)
@@ -26,8 +32,8 @@ get_schedule_scores <- function(team, year) {
 # The /teams/CLE/YYYY.shtml page has several tables, but only the first two
 # (batting and pitching) show up in the html (the others are commented out???).
 # This function grabs both and returns them as a list.
-get_batting_pitching <- function(team, year) {
-  u <- glue("https://www.baseball-reference.com/teams/{team}/{year}.shtml")
+get_batting_pitching <- function(year) {
+  u <- glue("{bref_base_url}/{year}.shtml")
   u_raw <- httr::GET(u)
   u_char <- rawToChar(u_raw$content)
   # Reads 2 tables: team_batting and team_pitching
@@ -38,11 +44,11 @@ get_batting_pitching <- function(team, year) {
 }
 
 # This script writes results to .rds for aggregation in later step. No need to
-# pull any season more than one time.
+# pull any season more than one time. First time I ran this was with 20 seasons.
 season <- 2023:2023
 names(season) <- season
 
-cle_games_raw <- map_df(season, ~get_schedule_scores("CLE", .x), .id = "season")
+cle_games_raw <- map_df(season, ~get_schedule_scores(.x), .id = "season")
 colnames(cle_games_raw) <- c(
   "season", "game_no", "date_str", "boxscore", "team", "home_ind", "opponent", 
   "outcome", "runs_scored", "runs_allowed", "innings", "new_record", "new_rank", 
@@ -50,7 +56,7 @@ colnames(cle_games_raw) <- c(
   "game_duration", "day_night", "attendance", "new_streak", "orig_sched", "cli"
 )
 
-cle_players_raw <- map(season, ~get_batting_pitching("CLE", .x))
+cle_players_raw <- map(season, ~get_batting_pitching(.x))
 cle_batting_raw <- map(cle_players_raw, ~.$team_batting) %>% list_rbind(names_to = "season")
 cle_pitching_raw <- map(cle_players_raw, ~.$team_pitching) %>% list_rbind(names_to = "season")
 
@@ -80,7 +86,7 @@ cle_batting_agg_raw <- map_df(fns, ~readRDS(file.path("data", .x)))
 fns <- list.files(path = "data", pattern = "^cle_pitching_.*_raw.rds")
 cle_pitching_agg_raw <- map_df(fns, ~readRDS(file.path("data", .x)))
 
-# Clean the game summaries.
+# Clean the data
 cle_games <- cle_games_agg_raw %>% 
   # filter out repeating header rows
   filter(game_no != "Gm#") %>%
@@ -154,6 +160,7 @@ cle_pitching <- cle_pitching_agg_raw %>%
   select(-Rk)
 
 # Save final data frames.
+#
 saveRDS(cle_games, file.path("data", "cle_games.rds"))
 
 saveRDS(cle_batting, file.path("data", "cle_batting.rds"))

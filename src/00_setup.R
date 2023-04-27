@@ -16,6 +16,12 @@ theme_set(
 )
 
 # Format decimal hours into h:m.
-pretty_hm <- function(hrs) { 
-  str_sub(chron::times(hrs %/% 60 + hrs %% 60 / 60) / 24, 5, 8) 
+pretty_hm <- function(hrs, verbose = FALSE) { 
+  my_datetime <- as_datetime(today() + dhours(hrs)) %>% round_date("minute")
+  if(verbose) {
+    my_str <- paste(hour(my_datetime), "hours", minute(my_datetime), "minutes")
+  } else {
+    my_str <- format(my_datetime, "%H:%M")
+  }
+  my_str
 }
