@@ -31,6 +31,7 @@ library(gridGraphics)
 library(grid)
 
 source("00_setup.R")
+# loadfonts(device="win")
 ball_png <- png::readPNG("../assets/baseball.png", native = TRUE)
 ball_grob <- grid::rasterGrob(ball_png, interpolate = FALSE)
 ```
@@ -105,8 +106,7 @@ cle_batting_ts <- cle_batting %>%
   # Singles are used in SLG calc.
   mutate(`1B` = H - (`2B` + `3B` + HR)) %>%
   relocate(`1B`, .before = 10) %>%
-  rename(yr = season) %>%
-  summarize(.by = yr, across(c(PA:SO, TB:IBB), ~sum(.x, na.rm = TRUE))) %>%
+  summarize(.by = season, across(c(PA:SO, TB:IBB), ~sum(.x, na.rm = TRUE))) %>%
   mutate(
     BA = H / AB,
     OBP = (H + BB + HBP) / (AB + BB + HBP + SF),
@@ -114,11 +114,10 @@ cle_batting_ts <- cle_batting %>%
     OPS = OBP + SLG
   ) %>%
   rename_with(~ paste0("batting_", .x), c(PA:OPS)) %>%
-  tsibble(index = yr)
+  tsibble(index = season)
 
 cle_pitching_ts <- cle_pitching %>%
-  rename(yr = season) %>%
-  summarize(.by = yr, across(c(G:BF), ~sum(.x, na.rm = TRUE))) %>%
+  summarize(.by = season, across(c(G:BF), ~sum(.x, na.rm = TRUE))) %>%
   mutate(
     ERA = 9 * ER / IP,
     WHIP = (BB + H) / IP,
@@ -129,7 +128,7 @@ cle_pitching_ts <- cle_pitching %>%
   ) %>%
   select(-c(GS, GF, SV)) %>%
   rename_with(~ paste0("pitching_", .x), c(G:SO_per_9)) %>%
-  tsibble(index = yr)
+  tsibble(index = season)
 ```
 
 `cle_games_ts` is at the game granularity. Summarize it to the season level and combine with the batting and pitching season summaries to create a singe tsibble.
@@ -138,7 +137,7 @@ cle_pitching_ts <- cle_pitching %>%
 summarize_games <- function(dat) {
   dat %>% summarize(
     avg_hours = mean(game_hours, na.rm = TRUE),
-    avg_hours_per_9 = mean(hours_per_9, na.rm = TRUE),
+    hours_per_9 = mean(hours_per_9, na.rm = TRUE),
     avg_home_attendance = mean(if_else(home_ind == "Home", attendance, NA_real_), na.rm = TRUE),
     wins = sum(str_sub(outcome, 1, 1) == "W"),
     losses = sum(str_sub(outcome, 1, 1) == "L"),
@@ -153,11 +152,11 @@ summarize_games <- function(dat) {
 
 cle_season_ts <- cle_games_ts %>%
   arrange(season, game_no) %>% #filter(season == 2020)
-  index_by(yr = ~ year(.)) %>%
+  index_by(season = ~ year(.)) %>%
   summarize_games() %>%
   mutate(winning_pct = wins / (wins + losses)) %>%
   relocate(c(winning_pct, place), .after = 6) %>%
-  inner_join(cle_batting_ts, join_by(yr)) %>%
+  inner_join(cle_batting_ts, join_by(season)) %>%
   mutate(
     batting_PA_per_9 = batting_PA / innings * 9,
     batting_SB_per_9 = batting_SB / innings * 9,
@@ -167,7 +166,7 @@ cle_season_ts <- cle_games_ts %>%
     batting_BB_per_9 = batting_BB / innings * 9,
     batting_SO_per_9 = batting_SO / innings * 9
   ) %>%
-  inner_join(cle_pitching_ts, join_by(yr))
+  inner_join(cle_pitching_ts, join_by(season))
 ```
 
 The MLB data is already at the seasonal granularity. Define it as a tsibble.
@@ -188,20 +187,19 @@ Almost all features are fully populated. Attendance is somewhat spotty before 19
 ```{r}
 p1 <- cle_games_ts %>%
   filter(doubleheader_game == 0) %>%
-  index_by(yr = ~ year(.)) %>%
-  # group_by(yr, doubleheader_game) %>%
+  index_by(season = ~ year(.)) %>%
   summarize(na_attendance = sum(if_else(is.na(attendance), 1, 0))) %>%
-  ggplot(aes(x = yr, y = na_attendance)) + 
-  geom_col(width = 1.0, fill = cle_colors["red"], alpha = 0.6) +
+  ggplot(aes(x = season, y = na_attendance)) + 
+  geom_col(width = 1.0, fill = "#E31937", alpha = 0.6) +
   scale_x_continuous(breaks = seq(1900, 2030, 10)) +
   annotate(
     geom = "curve", x = 2012, y = 57, xend = 2017, yend = 47, 
     curvature = .10, arrow = arrow(length = unit(2, "mm")),
-    color = cle_colors["navy_blue"]
+    color = "#0C2340"
   ) +
   annotate(
     geom = "text", x = 2007, y = 68, label = "COVID", size = 3.5, 
-    family = "Rockwell Condensed", hjust = "left", color = cle_colors["navy_blue"]) +
+    family = "Rockwell Condensed", hjust = "left", color = "#0C2340") +
   coord_cartesian(ylim = c(0, 150)) +
   theme(axis.text.x = element_blank()) +
   labs(
@@ -210,11 +208,11 @@ p1 <- cle_games_ts %>%
   )
 
 p2 <- cle_games_ts %>%
-  index_by(yr = ~ year(.)) %>%
-  group_by(yr) %>%
+  index_by(season = ~ year(.)) %>%
+  group_by(season) %>%
   summarize(na_duration = sum(if_else(is.na(game_duration), 1, 0))) %>%
-  ggplot(aes(x = yr, y = na_duration)) + 
-  geom_col(width = 1.0, fill = cle_colors["red"], alpha = 0.6) +
+  ggplot(aes(x = season, y = na_duration)) + 
+  geom_col(width = 1.0, fill = "#E31937", alpha = 0.6) +
   scale_x_continuous(breaks = seq(1900, 2030, 10)) +
   # theme_light() +
   # theme_mlb +
@@ -258,21 +256,21 @@ Attendance is generally correlated with winning, but something seems wrong with 
 ```{r}
 SF <- 50000
 (step_2_fig1 <- cle_season_ts %>%
-  mutate(attend = if_else(yr == 2020, 0, avg_home_attendance)) %>%
-  ggplot(aes(x = yr, y = attend)) +
-  geom_col(aes(y = 1 * SF), fill = cle_colors["navy_blue"], width = 1, alpha = 0.2) +
-  geom_col(aes(y = wins / (wins + losses) * SF), fill = cle_colors["navy_blue"], width = 1, alpha = 0.2) +
-  geom_line(color = cle_colors["red"], na.rm = TRUE, linewidth = 1) +
-  geom_point(aes(y = if_else(yr %in% c(1920, 1948, 1954, 1995, 1997, 2016), attend, NA_real_)),
-             shape = 21, color = cle_colors["red"], fill = "white", size = 3, na.rm = TRUE) +
-  geom_hline(yintercept = 0.50 * SF, linetype = 3, linewidth = 1, color = cle_colors["navy_blue"]) +
+  mutate(attend = if_else(season == 2020, 0, avg_home_attendance)) %>%
+  ggplot(aes(x = season, y = attend)) +
+  geom_col(aes(y = 1 * SF), fill = "#0C2340", width = 1, alpha = 0.2) +
+  geom_col(aes(y = wins / (wins + losses) * SF), fill = "#0C2340", width = 1, alpha = 0.2) +
+  geom_line(color = "#E31937", na.rm = TRUE, linewidth = 1) +
+  geom_point(aes(y = if_else(season %in% c(1920, 1948, 1954, 1995, 1997, 2016), attend, NA_real_)),
+             shape = 21, color = "#E31937", fill = "white", size = 3, na.rm = TRUE) +
+  geom_hline(yintercept = 0.50 * SF, linetype = 3, linewidth = 1, color = "#0C2340") +
   annotate(
     geom = "curve", x = 1960, y = 28000, xend = 1954, yend = 22000, 
     curvature = .3, arrow = arrow(length = unit(2, "mm")),
-    color = cle_colors["navy_blue"]
+    color = "#0C2340"
   ) +
   annotate("text", x = 1960, y = 28000, label = "where is everyone?", size = 3, 
-           hjust = "left", color = cle_colors["navy_blue"]) +
+           hjust = "left", color = "#0C2340") +
   scale_y_continuous(limits = c(0, NA), 
                      labels = scales::comma,
                      expand = c(0,0),
@@ -285,9 +283,9 @@ SF <- 50000
        subtitle = "Annual attendance averages and Cleveland's winning percentage.",
        caption = "source: www.baseball-reference.com.") +
   theme(
-    axis.text.y.left = element_text(color = cle_colors["red"]),
-    axis.title.y.left = element_text(color = cle_colors["red"], margin = margin(r = 5)),
-    axis.title.y.right = element_text(color = cle_colors["navy_blue"], margin = margin(l = 5))
+    axis.text.y.left = element_text(color = "#E31937"),
+    axis.title.y.left = element_text(color = "#E31937", margin = margin(r = 5)),
+    axis.title.y.right = element_text(color = "#0C2340", margin = margin(l = 5))
   )
 )
 ```
@@ -297,67 +295,63 @@ As an aside, check out 1917 and 1918. Game attendance does not seem unusual thos
 ## Game Duration {.tabset}
 
 ```{r}
-max_avg <- cle_season_ts %>% slice_max(order_by = avg_hours_per_9)
-avg_2023 <- cle_season_ts %>% filter(yr == 2023)
+max_avg <- mlb_season_ts %>% slice_max(order_by = hours_per_9)
+avg_2023 <- mlb_season_ts %>% filter(season == 2023)
 ```
 
-Games typically lasted around two hours up to 1945. Then over the course of ten seasons game times increased to 2.5 hours. In the late 1970s games began increasing again, peaking at `r max_avg %>% pull(avg_hours_per_9) %>% pretty_hm(verbose = TRUE)` in `r max_avg %>% pull(yr)`. They dropped briefly before resuming their climb through 2021. Significant changes in 2023 appear to have halted the advance. Average Guardians game times in 2023 have been `r avg_2023 %>% pull(avg_hours_per_9) %>% pretty_hm(verbose = TRUE)` through `r avg_2023 %>% pull(games)` games.
+Games typically lasted around two hours up to 1945. Then over the course of ten seasons game times increased to 2.5 hours. In the late 1970s games began increasing again, peaking at `r max_avg %>% pull(hours_per_9) %>% pretty_hm(verbose = TRUE)` in `r max_avg %>% pull(season)`. Significant changes in 2023 appear to have halted the advance. Average game times in 2023 have been `r avg_2023 %>% pull(hours_per_9) %>% pretty_hm(verbose = TRUE)` year to date.
 
 Average game duration does not appear to change much within seasons. It falls about .2 hours (12 minutes) over the course of the season. The apparent increase in March game times is an artifact of March games not occurring until 1998. 
 
 ### By Year
 
 ```{r}
-knot_yrs <- c(1913, 1944, 1955, 1978, 2000, 2003, 2021)
+knot_yrs <- c(1944, 1955, 1978, 2021, 2023)
 
 model(mlb_season_ts, TSLM(hours_per_9 ~ trend(knots = knot_yrs))) %>%
   augment() %>%
   ggplot(aes(x = season)) +
-  geom_line(aes(y = hours_per_9), color = cle_colors["red"], linewidth = 1) +
-  geom_line(aes(y = .fitted), color = "black", linetype = 2, linewidth = .5) +
-  geom_text(data = mlb_season_ts %>% filter(season %in% c(1945, 2000, 2021, 2023)), 
-            aes(y = hours_per_9 + if_else(season == 2023, -.15, +.15), label = pretty_hm(hours_per_9)), 
-            size = 3, color = cle_colors["red"], hjust = 0) + 
-  geom_point(data = mlb_season_ts %>% filter(season %in% c(1945, 2000, 2021, 2023)), 
+  geom_line(aes(y = hours_per_9), color = "#003831", linewidth = 1) +
+  geom_line(aes(y = .fitted), color = "#fd5a1e", linetype = 2, linewidth = .5) +
+  geom_text(data = mlb_season_ts %>% filter(season %in% knot_yrs), 
+            aes(y = hours_per_9 + if_else(season < 1980, -.15, +.15), label = pretty_hm(hours_per_9)), 
+            family = "Rockwell", size = 3.5, color = "#003831", hjust = 0) + 
+  geom_point(data = mlb_season_ts %>% filter(season %in% knot_yrs), 
              aes(y = hours_per_9),
-             color = cle_colors["red"], size = 2) +
+             color = "#fd5a1e", size = 2) +
   scale_x_continuous(breaks = seq(1900, 2030, 10)) +
-  scale_y_continuous(limits = c(0, NA), n.breaks = 4) +
+  scale_y_continuous(limits = c(0, NA), n.breaks = 8, labels = pretty_hm) +
   coord_cartesian(xlim = c(1900, 2030), ylim = c(0, 3.5)) +
   labs(
-    title = "How long have we been sitting here?",
-    subtitle = "MLB game duration trend.",
-    caption = "source: www.baseball-reference.com.",
-    x = NULL, y = "Hours"
+    title = "Pace of play returning to historic rates",
+    subtitle = "Average time per nine innings of play.",
+    caption = "Source: MLB Sats API.",
+    x = NULL, y = NULL
   )
 ```
 
-### CLE By Year
+### CLE
 
 ```{r}
-knot_yrs <- c(1913, 1944, 1955, 1978, 2000, 2003, 2021)
-
-fmla_pls <- formula(avg_hours_per_9 ~ trend(knots = knot_yrs))
-
-model(cle_season_ts, TSLM(avg_hours_per_9 ~ trend(knots = knot_yrs))) %>%
+model(cle_season_ts, TSLM(hours_per_9 ~ trend(knots = knot_yrs))) %>%
   augment() %>%
-  ggplot(aes(x = yr)) +
-  geom_line(aes(y = avg_hours_per_9), color = cle_colors["red"], linewidth = 1) +
-  geom_line(aes(y = .fitted), color = "black", linetype = 2, linewidth = .5) +
-  geom_text(data = cle_season_ts %>% filter(yr %in% c(1901, 2000, 2023)), 
-            aes(y = avg_hours_per_9 + if_else(yr == 2023, -.15, +.15), label = pretty_hm(avg_hours_per_9)), 
-            size = 3, color = cle_colors["red"], hjust = 0) + 
-  geom_point(data = cle_season_ts %>% filter(yr %in% c(1901, 2000, 2023)), 
-             aes(y = avg_hours_per_9),
-             color = cle_colors["red"], size = 2) +
+  ggplot(aes(x = season)) +
+  geom_line(aes(y = hours_per_9), color = "#0C2340", linewidth = 1) +
+  geom_line(aes(y = .fitted), color = "#E31937", linetype = 2, linewidth = .5) +
+  geom_text(data = cle_season_ts %>% filter(season %in% knot_yrs), 
+            aes(y = hours_per_9 + if_else(season < 1980, -.15, +.15), label = pretty_hm(hours_per_9)), 
+            family = "Rockwell", size = 3.5, color = "#0C2340", hjust = 0) + 
+  geom_point(data = cle_season_ts %>% filter(season %in% knot_yrs), 
+             aes(y = hours_per_9),
+             color = "#E31937", size = 2) +
   scale_x_continuous(breaks = seq(1900, 2030, 10)) +
-  scale_y_continuous(limits = c(0, NA), n.breaks = 4) +
+  scale_y_continuous(limits = c(0, NA), n.breaks = 8, labels = pretty_hm) +
   coord_cartesian(xlim = c(1900, 2030), ylim = c(0, 3.5)) +
   labs(
-    title = "How long have we been sitting here?",
-    subtitle = "Cleveland game duration trend.",
-    caption = "source: www.baseball-reference.com.",
-    x = NULL, y = "Hours"
+    title = "Pace of play returning to historic rates",
+    subtitle = "Cleveland baseball average time per nine innings of play.",
+    caption = "Source: www.baseball-reference.com.",
+    x = NULL, y = NULL
   )
 ```
 
@@ -375,19 +369,19 @@ cle_tsibble_mmm <- cle_games_ts %>%
 
 ggplot() +
   geom_line(data = cle_tsibble_yrmo,
-            aes(x = month(yrmo, label = TRUE, abbr = TRUE), y = avg_hours_per_9,
+            aes(x = month(yrmo, label = TRUE, abbr = TRUE), y = hours_per_9,
                 group = factor(year(yrmo)), color = year(yrmo)),
             show.legend = TRUE, alpha = 0.2) +
-  scale_color_gradient(low = all_colors[6], high = all_colors[2]) +
+  scale_color_gradient(low = "#0C2340", high = "#E31937") +
   geom_line(data = cle_tsibble_mmm,
-            aes(x = month(mmm, label = TRUE, abbr = TRUE), y = avg_hours_per_9,
+            aes(x = month(mmm, label = TRUE, abbr = TRUE), y = hours_per_9,
                 group = factor(year(mmm))), 
             alpha = 0.8) +
-  scale_y_continuous(limits = c(0, NA)) +
+  scale_y_continuous(limits = c(0, NA), labels = pretty_hm) +
   theme(axis.text.x = element_text(angle = 0, vjust = 0.25)) +
   labs(title = "Game duration falls slightly within a season.",
        subtitle = "Average game duration by month of season. Bold line is average.", 
-       x = NULL, y = "Hours", color = NULL,
+       x = NULL, y = NULL, color = NULL,
        caption = "source: www.baseball-reference.com.")
 ```
 
@@ -396,13 +390,13 @@ ggplot() +
 ```{r}
 double_header <- cle_games_ts %>%
   mutate(doubleheader_ind = if_else(doubleheader_game == 0, "Single Game", "Doubleheader")) %>%
-  index_by(yr = ~ year(.)) %>%
-  group_by(yr, doubleheader_ind) %>%
+  index_by(season = ~ year(.)) %>%
+  group_by(season, doubleheader_ind) %>%
   summarize(hours_per_9 = mean(hours_per_9, na.rm = TRUE), n = n())
 
 double_header_effect <- double_header %>%
   as_tibble() %>%
-  pivot_wider(id_cols = yr, names_from = doubleheader_ind, values_from = hours_per_9) %>%
+  pivot_wider(id_cols = season, names_from = doubleheader_ind, values_from = hours_per_9) %>%
   mutate(twin_diff = `Doubleheader` - `Single Game`)
 ```
 
@@ -413,11 +407,11 @@ Doubleheaders have become less common while game times have increased. Is there 
 ```{r}
 SF <- 50 # scaling factor for sec.axis.
 double_header %>%
-  ggplot(aes(x = yr)) +
+  ggplot(aes(x = season)) +
   geom_col(aes(y = n / SF, fill = fct_rev(doubleheader_ind)), alpha = 0.2, width = 1.0) +
   geom_line(aes(y = hours_per_9, color = fct_rev(doubleheader_ind)), linewidth = 1) +
-  scale_color_manual(values = all_colors) +
-  scale_fill_manual(values = all_colors) +
+  scale_color_manual(values = as.character(pal_cle)) +
+  scale_fill_manual(values = as.character(pal_cle)) +
   scale_x_continuous(breaks = seq(1900, 2030, 10)) +
   scale_y_continuous(limits = c(0, NA), n.breaks = 4,
     sec.axis = sec_axis(trans = ~ .x * SF, labels = comma_format(), name = "Games Played")
@@ -437,8 +431,8 @@ double_header %>%
 
 ```{r}
 day_night <- cle_games_ts %>%
-  index_by(yr = ~ year(.)) %>%
-  group_by(yr, day_ind) %>%
+  index_by(season = ~ year(.)) %>%
+  group_by(season, day_ind) %>%
   summarize(hours_per_9 = mean(hours_per_9, na.rm = TRUE), n = n())
 ```
 
@@ -447,11 +441,11 @@ Until the late 1930s, all games were played in the afternoon. By the mid 1970s d
 ```{r}
 SF <- 50 # scaling factor for sec.axis.
 day_night %>%
-  ggplot(aes(x = yr)) +
+  ggplot(aes(x = season)) +
   geom_col(aes(y = n / SF, fill = day_ind), alpha = 0.2, width = 1.0) +
   geom_line(aes(y = hours_per_9, color = day_ind), linewidth = 1) +
-  scale_color_manual(values = all_colors) +
-  scale_fill_manual(values = all_colors) +
+  scale_color_manual(values = as.character(pal_cle)) +
+  scale_fill_manual(values = as.character(pal_cle)) +
   scale_x_continuous(breaks = seq(1900, 2030, 10)) +
   scale_y_continuous(limits = c(0, NA), n.breaks = 4,
     sec.axis = sec_axis(trans = ~ .x * SF, labels = comma_format(), name = "Games Played")
@@ -469,14 +463,14 @@ day_night %>%
 
 ## Runs
 
-I'm curious about the dip in game duration between 2000 and 2003. Game duration reached its peak at `r cle_season_ts %>% filter(yr == 2000) %>% pull(avg_hours_per_9) %>% pretty_hm()` per game in 2000. Then it underwent a brief period of decline, falling to `r cle_season_ts %>% filter(yr == 2003) %>% pull(avg_hours_per_9) %>% pretty_hm()` in 2003. It climbed back to `r cle_season_ts %>% filter(yr == 2021) %>% pull(avg_hours_per_9) %>% pretty_hm()` in 2021. I wonder if the reduction in offense after the steroid era is related. Below is the trend of average game times with total runs scored. They both plummeted over that three year period, but they've been moving in opposite directions since 2010. 
+I'm curious about the dip in game duration between 2000 and 2003. Game duration reached its peak at `r cle_season_ts %>% filter(season == 2000) %>% pull(hours_per_9) %>% pretty_hm()` per game in 2000. Then it underwent a brief period of decline, falling to `r cle_season_ts %>% filter(season == 2003) %>% pull(hours_per_9) %>% pretty_hm()` in 2003. It climbed back to `r cle_season_ts %>% filter(season == 2021) %>% pull(hours_per_9) %>% pretty_hm()` in 2021. I wonder if the reduction in offense after the steroid era is related. Below is the trend of average game times with total runs scored. They both plummeted over that three year period, but they've been moving in opposite directions since 2010. 
 
 ```{r}
 SF <- 5 # scaling factor for sec.axis.
 cle_season_ts %>%
-  ggplot(aes(x = yr)) +
-  geom_line(aes(y = avg_hours_per_9), linewidth = 1, color = cle_colors["red"]) +
-  geom_col(aes(y = avg_runs_per_9 / SF), width = 1.0, fill = cle_colors["navy_blue"], alpha = 0.2) +
+  ggplot(aes(x = season)) +
+  geom_line(aes(y = hours_per_9), linewidth = 1, color = "#E31937") +
+  geom_col(aes(y = avg_runs_per_9 / SF), width = 1.0, fill = "#0C2340", alpha = 0.2) +
   scale_x_continuous(breaks = seq(1900, 2030, 10)) +
   scale_y_continuous(limits = c(0, NA), n.breaks = 4,
     sec.axis = sec_axis(trans = ~ .x * SF, labels = comma_format(), name = "Runs")
@@ -487,9 +481,9 @@ cle_season_ts %>%
        subtitle = "Cleveland average game duration vs runs scored.",
        caption = "source: www.baseball-reference.com.") +
    theme(
-     axis.text.y.left = element_text(color = cle_colors["red"]),
-     axis.title.y.left = element_text(color = cle_colors["red"]),
-     axis.title.y.right = element_text(color = cle_colors["navy_blue"], margin = margin(l = 5)),
+     axis.text.y.left = element_text(color = "#E31937"),
+     axis.title.y.left = element_text(color = "#E31937"),
+     axis.title.y.right = element_text(color = "#0C2340", margin = margin(l = 5)),
      plot.caption = element_text(family = "Calibri Light", size = 11)
    )
 ```
@@ -498,15 +492,15 @@ Incidentally, compare the offense in the 1930s to the steroid era of the 1990s. 
 
 ## Plate Appearances
 
-I'm curious about the dip in game duration between 2000 and 2003. Game duration reached its peak at `r cle_season_ts %>% filter(yr == 2000) %>% pull(avg_hours_per_9) %>% pretty_hm()` per game in 2000. Then it underwent a brief period of decline, falling to `r cle_season_ts %>% filter(yr == 2003) %>% pull(avg_hours_per_9) %>% pretty_hm()` in 2003. It climbed back to `r cle_season_ts %>% filter(yr == 2021) %>% pull(avg_hours_per_9) %>% pretty_hm()` in 2021. I wonder if the reduction in offense after the steroid era is related. Below is the trend of average game times with total runs scored. They both plummeted over that three year period, but they've been moving in opposite directions since 2010. 
+I'm curious about the dip in game duration between 2000 and 2003. Game duration reached its peak at `r cle_season_ts %>% filter(season == 2000) %>% pull(hours_per_9) %>% pretty_hm()` per game in 2000. Then it underwent a brief period of decline, falling to `r cle_season_ts %>% filter(season == 2003) %>% pull(hours_per_9) %>% pretty_hm()` in 2003. It climbed back to `r cle_season_ts %>% filter(season == 2021) %>% pull(hours_per_9) %>% pretty_hm()` in 2021. I wonder if the reduction in offense after the steroid era is related. Below is the trend of average game times with total runs scored. They both plummeted over that three year period, but they've been moving in opposite directions since 2010. 
 
 ```{r}
 SF <- 10
 cle_season_ts %>%
   mutate(PA = batting_PA_per_9 + pitching_BF / innings * 9) %>%
-  ggplot(aes(x = yr)) +
-  geom_line(aes(y = avg_hours_per_9), linewidth = 1, color = cle_colors["red"]) +
-  geom_line(aes(y = PA / SF - 5), linewidth = 1, color = cle_colors["navy_blue"]) +
+  ggplot(aes(x = season)) +
+  geom_line(aes(y = hours_per_9), linewidth = 1, color = "#E31937") +
+  geom_line(aes(y = PA / SF - 5), linewidth = 1, color = "#0C2340") +
   scale_x_continuous(breaks = seq(1900, 2030, 10)) +
   scale_y_continuous(limits = c(0, NA), n.breaks = 4,
     sec.axis = sec_axis(trans = ~ (.x + 5) * SF, labels = comma_format(), name = "Plate Appearances")
@@ -517,25 +511,25 @@ cle_season_ts %>%
        subtitle = "Cleveland average game duration vs plate appearances.",
        caption = "source: www.baseball-reference.com.") +
    theme(
-     axis.text.y.left = element_text(color = cle_colors["red"]),
-     axis.text.y.right = element_text(color = cle_colors["navy_blue"], margin = margin(2, 2, 2, 2)),
-     axis.title.y.left = element_text(color = cle_colors["red"]),
-     axis.title.y.right = element_text(color = cle_colors["navy_blue"], margin = margin(l = 8)),
+     axis.text.y.left = element_text(color = "#E31937"),
+     axis.text.y.right = element_text(color = "#0C2340", margin = margin(2, 2, 2, 2)),
+     axis.title.y.left = element_text(color = "#E31937"),
+     axis.title.y.right = element_text(color = "#0C2340", margin = margin(l = 8)),
      plot.caption = element_text(family = "Calibri Light", size = 11),
    )
 ```
 
 ## Pitchers per Game
 
-I'm curious about the dip in game duration between 2000 and 2003. Game duration reached its peak at `r cle_season_ts %>% filter(yr == 2000) %>% pull(avg_hours_per_9) %>% pretty_hm()` per game in 2000. Then it underwent a brief period of decline, falling to `r cle_season_ts %>% filter(yr == 2003) %>% pull(avg_hours_per_9) %>% pretty_hm()` in 2003. It climbed back to `r cle_season_ts %>% filter(yr == 2021) %>% pull(avg_hours_per_9) %>% pretty_hm()` in 2021. I wonder if the reduction in offense after the steroid era is related. Below is the trend of average game times with total runs scored. They both plummeted over that three year period, but they've been moving in opposite directions since 2010. 
+I'm curious about the dip in game duration between 2000 and 2003. Game duration reached its peak at `r cle_season_ts %>% filter(season == 2000) %>% pull(hours_per_9) %>% pretty_hm()` per game in 2000. Then it underwent a brief period of decline, falling to `r cle_season_ts %>% filter(season == 2003) %>% pull(hours_per_9) %>% pretty_hm()` in 2003. It climbed back to `r cle_season_ts %>% filter(season == 2021) %>% pull(hours_per_9) %>% pretty_hm()` in 2021. I wonder if the reduction in offense after the steroid era is related. Below is the trend of average game times with total runs scored. They both plummeted over that three year period, but they've been moving in opposite directions since 2010. 
 
 ```{r}
 SF <- 5/3
 cle_season_ts %>%
   mutate(P = pitching_G / games) %>%
-  ggplot(aes(x = yr)) +
-  geom_line(aes(y = avg_hours_per_9), linewidth = 1, color = cle_colors["red"]) +
-  geom_line(aes(y = P / SF - 0), linewidth = 1, color = cle_colors["navy_blue"]) +
+  ggplot(aes(x = season)) +
+  geom_line(aes(y = hours_per_9), linewidth = 1, color = "#E31937") +
+  geom_line(aes(y = P / SF - 0), linewidth = 1, color = "#0C2340") +
   scale_x_continuous(breaks = seq(1900, 2030, 10)) +
   scale_y_continuous(limits = c(0, NA), n.breaks = 4,
     sec.axis = sec_axis(trans = ~ (.x + 0) * SF, labels = comma_format(), name = "Pitchers")
@@ -546,10 +540,10 @@ cle_season_ts %>%
        subtitle = "Cleveland average game duration vs Cleveland pitchers.",
        caption = "source: www.baseball-reference.com.") +
    theme(
-     axis.text.y.left = element_text(color = cle_colors["red"]),
-     axis.text.y.right = element_text(color = cle_colors["navy_blue"], margin = margin(2, 2, 2, 2)),
-     axis.title.y.left = element_text(color = cle_colors["red"]),
-     axis.title.y.right = element_text(color = cle_colors["navy_blue"], margin = margin(l = 8)),
+     axis.text.y.left = element_text(color = "#E31937"),
+     axis.text.y.right = element_text(color = "#0C2340", margin = margin(2, 2, 2, 2)),
+     axis.title.y.left = element_text(color = "#E31937"),
+     axis.title.y.right = element_text(color = "#0C2340", margin = margin(l = 8)),
      plot.caption = element_text(family = "Calibri Light", size = 11),
    )
 ```
@@ -567,13 +561,13 @@ The methods can include drift, a straight line from the first and last observati
 ```{r warning=FALSE}
 cle_season_ts %>%
   # fill_gaps() %>%
-  model(Average = MEAN(avg_hours_per_9),
-        Naive = NAIVE(avg_hours_per_9),
-        RW = RW(avg_hours_per_9 ~ drift())) %>%
+  model(Average = MEAN(hours_per_9),
+        Naive = NAIVE(hours_per_9),
+        RW = RW(hours_per_9 ~ drift())) %>%
   forecast(h = 10) %>%
-  ggplot(aes(x = yr)) +
+  ggplot(aes(x = season)) +
   geom_line(aes(y = .mean, color = .model)) +
-  geom_line(data = cle_season_ts %>% filter(yr >= 1911) %>% fill_gaps(), aes(y = avg_hours_per_9)) +
+  geom_line(data = cle_season_ts %>% filter(season >= 1911) %>% fill_gaps(), aes(y = hours_per_9)) +
   scale_y_continuous(limits = c(0, NA)) +
   scale_x_continuous(breaks = seq(1900, 2030, 10)) +
   labs(title = "Three benchmark Tribe game duration forecasts.",

@@ -1,16 +1,20 @@
 # Define theme colors for plots.
-cle_colors <- c("navy_blue" = "#0C2340", "red" = "#E31937")
-oak_colors <- c("gold" = "#efb21e", "kellygreen" = "#003831")
-vintage_colors <- c("#CBBCB1", "#AF6B58", "#556052", "#F2EFEA")
-all_colors <- c(cle_colors, oak_colors, vintage_colors)
-names(all_colors) <- NULL
+# https://colorkit.co/palettes/mlb/
+# https://teamcolorcodes.com/mlb-color-codes/
+pal_cle <- c("cle_blue" = "#0C2340", "cle_red" = "#E31937")
+pal_oak <- c("oak_gold" = "#efb21e", "oak_green" = "#003831")
+pal_sfg <- c("sfg_orange" = "#fd5a1e", "sfg_black" = "#27251f", "sfg_cream" = "#efd19f", "sfg_brown" = "#ae8f6f")
+pal_old <- c("old_dust" = "#CBBCB1", "old_dirt" = "#AF6B58", "old_grass" = "#556052", "old_plate" = "#F2EFEA")
+pal_mlb <- c(pal_cle, pal_oak, pal_sfg, pal_old)
+# names(all_colors) <- NULL
 
 # Instead of typing this out for every ggplot.
 theme_set(
   theme_light() +
     theme(
-      text = element_text(size = 16, family = "Rockwell Condensed", color = cle_colors["navy_blue"]),
-      plot.caption = element_text(family = "Calibri Light", hjust = 0, size = 10),
+      text = element_text(family = "Rockwell Condensed", size = 16, color = "#003831"),
+      plot.subtitle = element_text(family = "Rockwell", size = 12),
+      plot.caption = element_text(family = "Rockwell", size = 10, hjust = 0),
       panel.grid.minor = element_blank()
     )
 )

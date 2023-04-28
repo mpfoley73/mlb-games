@@ -80,18 +80,10 @@ mlb_pace <- mlb_pace_agg_raw %>%
     time_per_PA = hms(timePerPlateAppearance, quiet = TRUE), 
     time_per_P = hms(timePerPitch, quiet = TRUE)
   ) %>%
-  select(-c(sport.id:prPortalCalculatedFields.timePerExtraInnGame, 
-            hitsPerGame:inningsPlayedPerGame, totalGameTime:totalExtraInnGames,
-            timePerGame, timePerHit, timePerRun, timePer77PlateAppearances,
-            totalExtraInnTime, total9InnGamesCompletedEarly, total9InnGamesWithoutExtraInn,
-            pitchesPerGame, pitchersPerGame, plateAppearancesPerGame, total9InnGamesScheduled,
-            hitsPerRun, totalPitches, timePer9Inn, timePerPlateAppearance, timePerPitch,
-            contains("7Inn"))) %>%
   select(
-    season, H_per_9 = hitsPer9Inn, R_per_9 = runsPer9Inn, PA_per_9 = plateAppearancesPer9Inn, 
-    P_per_9 = pitchesPer9Inn, pitchers_per_9, P_per_pitcher = pitchesPerPitcher, P_per_PA,
-    time_per_9, time_per_PA, time_per_P,
-    everything()
+    season, games = totalGames, H_per_9 = hitsPer9Inn, R_per_9 = runsPer9Inn, 
+    PA_per_9 = plateAppearancesPer9Inn, P_per_9 = pitchesPer9Inn, pitchers_per_9, 
+    P_per_pitcher = pitchesPerPitcher, P_per_PA, time_per_9, time_per_PA, time_per_P
   )
 
 mlb_pace %>% str()
