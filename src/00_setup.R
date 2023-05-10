@@ -14,10 +14,12 @@ theme_set(
     theme(
       text = element_text(family = "Rockwell Condensed", size = 16, color = "#003831"),
       plot.subtitle = element_text(family = "Rockwell", size = 12),
-      plot.caption = element_text(family = "Rockwell", size = 10, hjust = 0),
+      plot.caption = element_text(size = 10, hjust = 0, color = "#666666"),
       panel.grid.minor = element_blank()
     )
 )
+
+caption_title <- function(title, desc) { glue("**Fig. {(fig_no <- fig_no + 1)} {title}**. {desc}") }
 
 # Format decimal hours into h:m.
 pretty_hm <- function(hrs, verbose = FALSE) { 
@@ -26,6 +28,17 @@ pretty_hm <- function(hrs, verbose = FALSE) {
     my_str <- paste(hour(my_datetime), "hours", minute(my_datetime), "minutes")
   } else {
     my_str <- format(my_datetime, "%H:%M")
+  }
+  my_str
+}
+
+# Format decimal minutes into m:s.
+pretty_ms <- function(minutes, verbose = FALSE) { 
+  my_datetime <- as_datetime(today() + dminutes(minutes)) %>% round_date("second")
+  if(verbose) {
+    my_str <- paste(minute(my_datetime), "minutes", second(my_datetime), "seconds")
+  } else {
+    my_str <- format(my_datetime, "%M:%S")
   }
   my_str
 }

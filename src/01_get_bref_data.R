@@ -68,22 +68,22 @@ if (length(season) > 1) {
 }
 
 fn <- glue("cle_games_{dt_range}_raw.rds")
-saveRDS(cle_games_raw, file.path("data", fn))
+saveRDS(cle_games_raw, file.path("data", "bref", fn))
 
 fn <- glue("cle_batting_{dt_range}_raw.rds")
-saveRDS(cle_batting_raw, file.path("data", fn))
+saveRDS(cle_batting_raw, file.path("data", "bref", fn))
 
 fn <- glue("cle_pitching_{dt_range}_raw.rds")
-saveRDS(cle_pitching_raw, file.path("data", fn))
+saveRDS(cle_pitching_raw, file.path("data", "bref", fn))
 
 # Aggregate all the raw data sets into a single data frame and clean.
-fns <- list.files(path = "data", pattern = "^cle_games_.*_raw.rds$")
+fns <- list.files(path = "data/bref", pattern = "^cle_games_.*_raw.rds$")
 cle_games_agg_raw <- map_df(fns, ~readRDS(file.path("data", .x)))
 
-fns <- list.files(path = "data", pattern = "^cle_batting_.*_raw.rds")
+fns <- list.files(path = "data/bref", pattern = "^cle_batting_.*_raw.rds")
 cle_batting_agg_raw <- map_df(fns, ~readRDS(file.path("data", .x)))
 
-fns <- list.files(path = "data", pattern = "^cle_pitching_.*_raw.rds")
+fns <- list.files(path = "data/bref", pattern = "^cle_pitching_.*_raw.rds")
 cle_pitching_agg_raw <- map_df(fns, ~readRDS(file.path("data", .x)))
 
 # Clean the data
@@ -112,9 +112,10 @@ cle_games <- cle_games_agg_raw %>%
     # new_streak is of form "++++" or "----"
     new_streak = if_else(str_detect(new_streak, "-"), -1, 1) * str_length(new_streak),
     # quiet = TRUE because many some games have no recorded duration
-    game_duration = hm(game_duration, quiet = TRUE),
+    game_duration = as.duration(hm(game_duration, quiet = TRUE)),
     attendance = str_remove(attendance, ",")
   ) %>%
+  # as.numeric throws a warning for conversion of empty strings.
   mutate(across(c(season, game_no, runs_scored:innings, new_rank,
                   new_games_back, attendance, cli), as.numeric)) %>%
   # Convert new_ cols into values entering the game
@@ -135,7 +136,7 @@ cle_games <- cle_games_agg_raw %>%
   mutate(outcome = factor(str_sub(outcome, 1, 1))) %>%
   select(
     season, game_no, game_date, opponent, outcome, runs_scored, runs_allowed, 
-    innings, game_duration, attendance, home_ind, day_ind, doubleheader_game,
+    innings, dur = game_duration, attendance, home_ind, day_ind, doubleheader_game,
     starts_with("old_"), starts_with("new_"), winning_pitcher, losing_pitcher, save
   )
 
@@ -149,14 +150,16 @@ cle_batting <- cle_batting_agg_raw %>%
   mutate(across(c(season, Age:IBB), as.numeric)) %>%
   select(-Rk)
 
-cle_pitching <- cle_pitching_agg_raw %>% 
+cle_pitching <- cle_pitching_agg_raw %>%
   # filter out repeating header rows
   filter(Rk != "Rk") %>%
   mutate(
     # symbols appended to name: *:=lefty, #:=switch, ?:=unknown. Remove all.
     Name = str_remove_all(Name, "(\\*)|(#)|(\\?)"),
+    ERA = if_else(ERA == "inf", "", ERA)
   ) %>%
-  mutate(across(c(season, Age:SO9), as.numeric)) %>%
+  mutate(across(c(season, Age:`SO/W`), as.numeric)) %>%
+  rename(SO_per_BB = `SO/W`) %>%
   select(-Rk)
 
 # Save final data frames.
