@@ -32,6 +32,7 @@ library(png)
 library(gridGraphics)
 library(grid)
 library(skimr)
+library(ggrepel)
 ```
 
 ```{r data}
@@ -73,6 +74,10 @@ R script **01_get_bref_data.R** scraped `r n_distinct(cle_games$season)` seasons
 #### MLB API
 
 The MLB API is publicly accessible. R package [baseballr](https://github.com/BillPetti/baseballr/) is an excellent tool. However, the API seems to have no public documentation, and changes functionality. I had trouble getting **baseballr** to work, probably because the API is a moving target. I was able to copy/paste the important code into my own script, **01_get_mlb_data.R**, and get the data I needed. One particularly useful module in the API is **gamePace**, an incredible set of metrics related to game pace. You can get data at the individual game level, or summarized by team. I originally wanted to focus on just Cleveland, but the team summaries only show the team's _home_ games. So if you want season summaries for a team, you really need _game_ summaries for all teams, then figure out which games Cleveland was the visiting team. This was just too much effort, so I shifted my focus to all MLB. As with **01_get_bref_data.R**, I used my MLB R script download all seasons through 2022, then I set it to just refresh 2023. _Run this script too when you refresh 2023_! Data set `mlb_pace` is a `r comma(nrow(mlb_pace))` x `r ncol(mlb_pace)` data frame with one row per each season, 1901-1923.
+
+#### Retrosheet
+
+
 
 Below, the **cle_games**, **cle_batting**, and **cle_pitching** tabs skim the data sets produced by **01_get_bref_data.R**. The **MLB-API** tab skims the data set produced by **01_get_mlb_data.R**. In **cle_games**, the `old_` columns are values coming into game day, and `new_` their value afterward. There **mlb_pace**, the time per pitch variable, `time_per_P`, varies a lot and does not seem reasonable.
 
@@ -196,82 +201,70 @@ cle_season_ts <- cle_games_ts %>%
   inner_join(cle_pitching_ts, join_by(season))
 ```
 
-The `mlb_pace` data set is already at the season granularity. The `mlb_batting` and `mlb_pitching` data sets are at the team-season granularity. The next code chunk just casts it to a tsibble.
+The `mlb_pace` data set is already at the season granularity. The `mlb_batting` and `mlb_pitching` data sets are at the team-season granularity. Summarize by season and casts to a tsibble.
 
 ```{r echo=TRUE}
 mlb_batting_ts <- mlb_batting %>%
   # Singles are used in SLG calc.
   mutate(`1B` = H - (`2B` + `3B` + HR)) %>%
-  relocate(`1B`, .before = 10) %>%
-  summarize(.by = season, across(c(PA:SO, TB:IBB), ~sum(.x, na.rm = TRUE))) %>%
+  relocate(`1B`, .before = 6) %>%
+  summarize(.by = season, across(c(G:HBP, AB, SB:PA, TB:K), ~sum(.x, na.rm = TRUE))) %>%
   mutate(
+    P = if_else(season <= 1973, NA_integer_, P),
+    K = if_else(season <= 1909, NA_integer_, K),
     BA = H / AB,
-    OBP = (H + BB + HBP) / (AB + BB + HBP + SF),
+    OBP = (H + BB + HBP) / (AB + BB + HBP + sac_bunts),
     SLG = (`1B` + 2*`2B` + 3*`3B` + 4*HR) / AB,
     OPS = OBP + SLG
   ) %>%
-  rename_with(~ paste0("batting_", .x), c(PA:OPS)) %>%
+  rename_with(~ paste0("batting_", .x), c(G:OPS)) %>%
   tsibble(index = season)
 
-cle_pitching_ts <- cle_pitching %>%
-  summarize(.by = season, across(c(G:BF), ~sum(.x, na.rm = TRUE))) %>%
-  mutate(
-    ERA = 9 * ER / IP,
-    WHIP = (BB + H) / IP,
-    H_per_9 = 9 * H / IP,
-    HR_per_9 = 9 * HR / IP,
-    BB_per_9 = 9 * BB / IP,
-    SO_per_9 = 9 * SO / IP
-  ) %>%
-  select(-c(GS, GF, SV)) %>%
-  rename_with(~ paste0("pitching_", .x), c(G:SO_per_9)) %>%
+mlb_pitching_ts <- mlb_pitching %>%
+  summarize(.by = season, across(c(G:HBP, AB, IP:ER, BF:wild_pitches), ~sum(.x, na.rm = TRUE))) %>%
+  rename_with(~ paste0("pitching_", .x), c(G:wild_pitches)) %>%
   tsibble(index = season)
 
-# `cle_games_ts` is at the game granularity. Summarize it to the season level
-# and combine with the batting and pitching season summaries to create a singe 
-# tsibble.
+mlb_pace_ts <- tsibble(mlb_pace, index = season)
 
-summarize_games <- function(dat) {
-  dat %>% summarize(
-    avg_hours = mean(game_hours, na.rm = TRUE),
-    hours_per_9 = mean(hours_per_9, na.rm = TRUE),
-    avg_home_attendance = mean(if_else(home_ind == "Home", attendance, NA_real_), na.rm = TRUE),
-    wins = sum(str_sub(outcome, 1, 1) == "W"),
-    losses = sum(str_sub(outcome, 1, 1) == "L"),
-    avg_runs_per_9 = mean(runs_per_9),
-    innings = sum(innings),
-    place = last(new_rank),
-    games = n(),
-    home_games = sum(home_ind == "Home"),
-    away_games = sum(home_ind == "Away")
-  )
-}
-
-cle_season_ts <- cle_games_ts %>%
-  arrange(season, game_no) %>% #filter(season == 2020)
-  index_by(season = ~ year(.)) %>%
-  summarize_games() %>%
-  mutate(winning_pct = wins / (wins + losses)) %>%
-  relocate(c(winning_pct, place), .after = 6) %>%
-  inner_join(cle_batting_ts, join_by(season)) %>%
+mlb_season_ts_0 <- mlb_pace_ts %>%
+  inner_join(mlb_batting_ts, by = join_by(season)) %>%
+  inner_join(mlb_pitching_ts, by = join_by(season)) %>%
   mutate(
-    batting_PA_per_9 = batting_PA / innings * 9,
-    batting_SB_per_9 = batting_SB / innings * 9,
-    batting_CS_per_9 = batting_CS / innings * 9,
-    batting_H_per_9 = batting_H / innings * 9,
-    batting_HR_per_9 = batting_HR / innings * 9,
-    batting_BB_per_9 = batting_BB / innings * 9,
-    batting_SO_per_9 = batting_SO / innings * 9
+    PA_per_G = PA / G,
+    PA_per_9 = PA / I * 9,
+    PA_per_pitcher = PA / pitchers,
+    pitchers_per_G = pitchers / G,
+    pitchers_per_9 = pitchers / I * 9,
+    pitchers_per_PA = pitchers / PA,
+    #new
+    P_per_G = P / G,
+    P_per_9 = P / I * 9,
+    P_per_PA = P / PA,
+    P_per_pitcher = P / pitchers,
+    R_per_G = R / G,
+    R_per_9 = R / I * 9,
+    H_per_9 = H / I * 9,
+    BB_per_9 = batting_BB / I * 9,
+    K_per_9 = pitching_K / I * 9,
+    SB_per_9 = batting_SB / I * 9,
+    CS_per_9 = batting_CS / I * 9,
+    H_per_9 = H / I * 9,
+    HR_per_9 = batting_HR / I * 9,
+    BB_per_9 = batting_BB / I * 9,
+    K_per_9 = pitching_K / I * 9,
+    P_per_9 = P / I * 9,
+    ERA = pitching_ER / I * 9 / 2, # two pitchers
+    WHIP = (batting_BB + H) / I / 2 # two pitchers
   ) %>%
-  inner_join(cle_pitching_ts, join_by(season))
-
-mlb_season_ts <- tsibble(mlb_pace, index = season) #%>%
-  # mutate(
-  #   hours_per_9 = as.duration(time_per_9) / dhours(1),
-  #   hours_per_G = as.duration(time_per_G) / dhours(1),
-  #   seconds_per_PA = as.duration(time_per_PA) / dseconds(1),
-  #   seconds_per_P = as.duration(time_per_P) / dseconds(1),
-  # )
+  select(-c(batting_G, pitching_G, batting_H, pitching_H,
+            batting_R, pitching_R, batting_PA, pitching_BF,
+            pitching_HR, pitching_BB, batting_K, batting_HBP, pitching_AB,
+            pitching_W, pitching_L, pitching_IP, batting_P, pitching_P,
+            pitching_outs, pitching_GS)) %>%
+  rename_with(~str_remove(.x, "batting_"), c(batting_1B:batting_BB, batting_AB:batting_OPS)) %>%
+  rename_with(~str_remove(.x, "pitching_"), c(pitching_K, pitching_HBP:pitching_wild_pitches)) %>%
+  relocate(K, .after = "BB")
 ```
 
 # Coverage and Quality {.tabset .tabset-fade .tabset-pills}
@@ -283,6 +276,8 @@ Attendance for game two of a double-header is recorded as zero, but many games t
 The pitch count per game (**MLB Pitches**) is potentially among the most important variables, but unfortunately the data is not populate until 1950. And even then, something is very wrong about the values before 1988. Furthermore, the 1988-1998 values are suspiciously noisy. I will null out the pre-1999 values for `total_P`.
 
 The `total_time` and `extra_I_time` columns have issues (**MLB Duration**). Something is obviously wrong with several data points prior to 1930. Imputing values gives more reasonable values (**Imputed Durations**).
+
+The stolen bases data does not pass the eyeball test prior to 1950. Stolen bases seem reasonable with the exception of 1914-15. Caught stealing
 
 ## CLE Attend.
 
@@ -334,38 +329,38 @@ cle_games_ts %>%
 ## MLB Pitches
 
 ```{r warning=FALSE}
-mlb_season_ts %>%
+mlb_season_ts_0 %>%
   mutate(
-    P_per_9I = P / I * 9,
-    status = case_when(season < 1988 ~ "Definitely bad",
-                       season < 1999 ~ "Suspicious",
-                       TRUE ~ "Probably good"),
-    status = factor(status, levels = c("Definitely bad", "Suspicious", "Probably good"))
+    status = factor(
+      case_when(season < 1988 ~ "Definitely bad",
+                season < 1999 ~ "Suspicious",
+                TRUE ~ "Probably good"),
+      levels = c("Definitely bad", "Suspicious", "Probably good")
+    )
   ) %>%
-  ggplot(aes(x = season, y = P_per_9I, color = status)) + 
+  ggplot(aes(x = season, y = P_per_9, color = status)) + 
   geom_point() +
   scale_color_manual(values = c("#E31937", "#efb21e", "#003831")) +
   labs(
     title = "MLB pitch count data is not reliable until 1999.", 
     subtitle = "Average pitches per nine innings.",
     x = NULL, y = NULL, color = NULL
-  ) +
-  theme(legend.position = "top")
+  )
 ```
 
-<font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`. MLB pitches per nine innings</b>. There is no recorded pitch counts until 1950 and until 1988 the values are less than half of what seems reasonable. The 1988-1998 values are still low and variable. Only 1999-present are consistent. <br>Source: MLB Stats API.</font>
+<font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`. MLB pitches per nine innings</b>. There is no recorded pitch counts until 1950 and until 1988 the values are less than half of what seems reasonable. The 1988-1998 values are still low and variable. Only 1999-present are consistent. <b>Source: MLB Stats API</b>.</font>
 
 ## MLB Duration
 
 ```{r}
 suspicious_seasons <- c(1902, 1903, 1904, 1907, 1918, 1919, 1928, 1929)
-mlb_season_ts %>%
+mlb_season_ts_0 %>%
   mutate(
-    dur_per_9I = time_length(dur / I * 9, "hours"),
+    dur_per_9 = time_length(dur / I * 9, "hours"),
     status = if_else(season %in% suspicious_seasons, "Suspicious", "Probably good"),
     status = factor(status, levels = c("Suspicious", "Probably good"))
   ) %>%
-  ggplot(aes(x = season, y = dur_per_9I, color = status)) + 
+  ggplot(aes(x = season, y = dur_per_9, color = status)) + 
   geom_point() +
   scale_color_manual(values = c("#efb21e", "#003831")) +
   scale_y_continuous(labels = pretty_hm, limits = c(0, 3.5)) +
@@ -383,24 +378,27 @@ mlb_season_ts %>%
 
 ```{r warning=FALSE, echo=TRUE}
 # Remove everything related to pitch counts prior to 1999.
-mlb_season_ts_2 <- mlb_season_ts %>%
+mlb_season_ts_1 <- mlb_season_ts_0 %>%
   mutate(P = if_else(season < 1999, NA_real_, P))
 
 # Remove bad values from time columns
-mlb_season_ts_3 <- mlb_season_ts_2 %>%
+mlb_season_ts_2 <- mlb_season_ts_1 %>%
   mutate(across(c(dur, extra_I_dur), ~if_else(season %in% suspicious_seasons, NA, .x)))
 
 # Use MICE to impute values in the time cols
-imp_total_time <- mlb_season_ts_3 %>%
-  select(-c(extra_I_dur, P)) %>%
+imp_total_time <- mlb_season_ts_2 %>%
+  # select(-c(extra_I_dur, P, `1B`:`3B`, ends_with("per_9"))) %>%
+  select(dur, I, PA, pitchers, K, BB, season) %>%
   mice::mice(print = FALSE, seed = 123) %>%
   complete()
 
-imp_extra_I_time <- mlb_season_ts_3 %>%
-  select(-c(dur, P)) %>%
+imp_extra_I_time <- mlb_season_ts_2 %>%
+  # select(-c(dur, P)) %>%
+  select(extra_I_dur, extra_I_G) %>%
   mice::mice(print = FALSE, seed = 123) %>%
   complete()
 
+mlb_season_ts_3 <- mlb_season_ts_2
 mlb_season_ts_3$dur <- imp_total_time$dur
 mlb_season_ts_3$extra_I_dur <- imp_extra_I_time$extra_I_dur
 ```
@@ -408,11 +406,11 @@ mlb_season_ts_3$extra_I_dur <- imp_extra_I_time$extra_I_dur
 ```{r}
 mlb_season_ts_3 %>%
   mutate(
-    dur_per_9I = time_length(dur / I * 9, "hours"),
+    dur_per_9 = time_length(dur / I * 9, "hours"),
     status = if_else(season %in% suspicious_seasons, "Imputed", "Probably good"),
     status = factor(status, levels = c("Imputed", "Probably good"))
   ) %>%
-  ggplot(aes(x = season, y = dur_per_9I, color = status)) + 
+  ggplot(aes(x = season, y = dur_per_9, color = status)) + 
   geom_point() +
   scale_color_manual(values = c("#efb21e", "#003831")) +
   scale_y_continuous(labels = pretty_hm, limits = c(0, 3.5)) +
@@ -423,37 +421,37 @@ mlb_season_ts_3 %>%
 
 <font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`. MLB game duration data with imputed values for outliers</b>. Values imputed with [MICE](https://mpfoley73.netlify.app/post/2022-07-26-imputing-values-with-mice/). <br>Source: MLB Stats API.</font>
 
+## Stolen Bases
+
+```{r warning=FALSE}
+mlb_season_ts_3 %>% 
+  pivot_longer(cols = c(SB_per_9, CS_per_9)) %>%
+  ggplot(aes(x = season, y = value, color = name)) +
+  geom_point() +
+  scale_color_manual(values = c("#003831", "#fd5a1e")) +
+  labs(
+    title = "Stolen base data is suspicious prior to 1953.",
+    subtitle = "Stolen bases per nine innings (points) and success rate (area).",
+    x = NULL, y = "Count", color = NULL
+  )
+```
+
+<font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`. MLB pitches per nine innings</b>. There is no recorded pitch counts until 1950 and until 1988 the values are less than half of what seems reasonable. The 1988-1998 values are still low and variable. Only 1999-present are consistent. <b>Source: MLB Stats API</b>.</font>
+
 # Feature Engineering
 
 As with the Baseball Reference data, I will standardize the MLB data into per-nine-innings and other related levels.
 
 ```{r echo=TRUE, class.source='fold-show'}
-mlb_season_ts_4 <- mlb_season_ts_3 %>%
+mlb_season_ts <- mlb_season_ts_3 %>%
   mutate(
     dur_per_G = dur / G,
-    dur_per_9I = dur / I * 9,
+    dur_per_9 = dur / I * 9,
     dur_per_PA = dur / PA,
-    dur_per_pitcher = dur / pitchers,
     dur_per_P = dur / P,
     dur_per_R = dur / R,
-    PA_per_G = PA / G,
-    PA_per_9I = PA / I * 9,
-    PA_per_pitcher = PA / pitchers,
-    pitchers_per_G = pitchers / G,
-    pitchers_per_9I = pitchers / I * 9,
-    pitchers_per_PA = pitchers / PA,
-    P_per_G = P / G,
-    P_per_9I = P / I * 9,
-    P_per_PA = P / PA,
-    P_per_pitcher = P / pitchers,
-    R_per_G = R / G,
-    R_per_9I = R / I * 9,
-    H_per_9I = H / I * 9,
-    # BB_per_9I = BB / I * 9,
-    # K_per_9I = K / I * 9,
     hrs_per_G = time_length(dur_per_G, "hours"),
-    hrs_per_9I = time_length(dur_per_9I, "hours"),
-    min_per_pitcher = time_length(dur_per_pitcher, "minutes"),
+    hrs_per_9 = time_length(dur_per_9, "hours"),
     min_per_PA = time_length(dur_per_PA, "minutes"),
     sec_per_P = time_length(dur_per_P, "seconds")
   )
@@ -518,12 +516,12 @@ As an aside, check out 1917 and 1918. Game attendance does not seem unusual thos
 ## Game Duration {.tabset}
 
 ```{r}
-max_avg <- mlb_season_ts_4 %>% slice_max(order_by = dur_per_9I)
-avg_2023 <- mlb_season_ts_4 %>% filter(season == 2023)
-max_m_23 <- time_length(max_avg[1, ]$dur_per_9I - avg_2023[1, ]$dur_per_9I, "minute")
+max_avg <- mlb_season_ts %>% slice_max(order_by = dur_per_9)
+avg_2023 <- mlb_season_ts %>% filter(season == 2023)
+max_m_23 <- time_length(max_avg[1, ]$dur_per_9 - avg_2023[1, ]$dur_per_9, "minute")
 ```
 
-Games typically lasted around two hours up to 1945. Then over the course of ten seasons game times increased to 2.5 hours. In the late 1970s games began increasing again, peaking at `r max_avg %>% pull(hrs_per_9I) %>% pretty_hm(verbose = TRUE)` in `r max_avg %>% pull(season)`. Significant changes in 2023 appear to have halted the advance. Average game times in 2023 have been `r avg_2023 %>% pull(hrs_per_9I) %>% pretty_hm(verbose = TRUE)` year to date, a `r comma(max_m_23)` minute reduction. Doug Pappas chronicled the increased playing times in the Summer 1995 issue of Outside the Lines, the SABR Business of Baseball Committee newsletter. Pappas found a Sporting News article from 1962 blaming longer game times on full counts, pitching changes, and delays between pitches.^[Doug Pappas. Originally published in the Summer 1995 issue of Outside the Lines, the SABR Business of Baseball Committee newsletter. [html](http://roadsidephotos.sabr.org/baseball/95gamelength.htm).]
+Games typically lasted around two hours up to 1945. Then over the course of ten seasons game times increased to 2.5 hours. In the late 1970s games began increasing again, peaking at `r max_avg %>% pull(hrs_per_9) %>% pretty_hm(verbose = TRUE)` in `r max_avg %>% pull(season)`. Significant changes in 2023 appear to have halted the advance. Average game times in 2023 have been `r avg_2023 %>% pull(hrs_per_9) %>% pretty_hm(verbose = TRUE)` year to date, a `r comma(max_m_23)` minute reduction. Doug Pappas chronicled the increased playing times in the Summer 1995 issue of Outside the Lines, the SABR Business of Baseball Committee newsletter. Pappas found a Sporting News article from 1962 blaming longer game times on full counts, pitching changes, and delays between pitches.^[Doug Pappas. Originally published in the Summer 1995 issue of Outside the Lines, the SABR Business of Baseball Committee newsletter. [html](http://roadsidephotos.sabr.org/baseball/95gamelength.htm).]
 
 Average game duration does not appear to change much within seasons.  
 
@@ -532,16 +530,16 @@ Average game duration does not appear to change much within seasons.
 ```{r}
 knot_yrs <- c(1944, 1955, 1978, 2021, 2023)
 
-model(mlb_season_ts_4, TSLM(hrs_per_9I ~ trend(knots = knot_yrs))) %>%
+model(mlb_season_ts, TSLM(hrs_per_9 ~ trend(knots = knot_yrs))) %>%
   augment() %>%
   ggplot(aes(x = season)) +
-  geom_line(aes(y = hrs_per_9I), color = "#003831", linewidth = 1) +
+  geom_line(aes(y = hrs_per_9), color = "#003831", linewidth = 1) +
   geom_line(aes(y = .fitted), color = "#fd5a1e", linetype = 2, linewidth = .5) +
-  geom_text(data = mlb_season_ts_4 %>% filter(season %in% knot_yrs), 
-            aes(y = hrs_per_9I + if_else(season == 2021, +.15, -.15), label = pretty_hm(hrs_per_9I)), 
+  geom_text(data = mlb_season_ts %>% filter(season %in% knot_yrs), 
+            aes(y = hrs_per_9 + if_else(season == 2021, +.15, -.15), label = pretty_hm(hrs_per_9)), 
             family = "Rockwell", size = 3.5, color = "#003831", hjust = 0) + 
-  geom_point(data = mlb_season_ts_4 %>% filter(season %in% knot_yrs), 
-             aes(y = hrs_per_9I),
+  geom_point(data = mlb_season_ts %>% filter(season %in% knot_yrs), 
+             aes(y = hrs_per_9),
              color = "#fd5a1e", size = 2) +
   scale_x_continuous(breaks = seq(1900, 2030, 10)) +
   scale_y_continuous(limits = c(0, NA), n.breaks = 8, labels = pretty_hm) +
@@ -553,7 +551,7 @@ model(mlb_season_ts_4, TSLM(hrs_per_9I ~ trend(knots = knot_yrs))) %>%
   )
 ```
 
-<font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`. Average elapsed time per nine innings of play</b>. Average elapsed time was stable at around two hours until a dramatic increase of 30 minutes from 1945-1955. Another 30 minutes were added between 1979 and 2000, peaking at `r max_avg %>% pull(hrs_per_9I) %>% pretty_hm(verbose = TRUE)` in `r max_avg %>% pull(season)`.</font>
+<font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`. Average elapsed time per nine innings of play</b>. Average elapsed time was stable at around two hours until a dramatic increase of 30 minutes from 1945-1955. Another 30 minutes were added between 1979 and 2000, peaking at `r max_avg %>% pull(hrs_per_9) %>% pretty_hm(verbose = TRUE)` in `r max_avg %>% pull(season)`.</font>
 
 ### CLE
 
@@ -690,44 +688,89 @@ day_night %>%
   )
 ```
 
-## Offense
+## Offense {.tabset}
 
-### Runs
+```{r include=FALSE}
+max_K <- mlb_season_ts %>% filter(K_per_9 == max(mlb_season_ts$K_per_9))
 
-Average runs varied quite a bit prior to 1920. Offense may have suffered during WWII. After recovering, it fell from 1960-1968. At the end of the steroid era in 2000, offense declined through 2014. The period from 1968-2005 does correlate well with game times, but they moved in opposite directions for the next ten years.
+# Fit a univariate OLS and pull the R^2. R^2 is .81!
+lm_K <- lm(hrs_per_9 ~ log(K_per_9), data = mlb_season_ts)
+r2_K <- broom::glance(lm_K) %>% pull(adj.r.squared)
+# The plot has evidence of autocorrelation - there are other factors impacting
+# the trend. Including a t-1 term increases R^2 to .95. The standard error of 
+# the regression is .10 - about 6 minutes.
+lm_K_trend <- mlb_season_ts %>% model(TSLM(hrs_per_9 ~ log(K_per_9) + trend()))
+lm_K_trend %>% report()
+```
+
+The number of plate appearances per game has not changed much over time (Fig. `r (fig_no + 1)`). However, the offensive outcomes have (Fig. `r (fig_no + 2)`). Strikeouts in particular have increased with game times and alone can explain about `r percent(r2_K, 1)` of the variation in average game duration (Fig. `r (fig_no + 2)`). 
+
+### PA Trend
 
 ```{r warning=FALSE}
-lbl_yr <- c(1930, 1968, 2000, 2023)
-mlb_season_ts_4 %>%
-  ggplot(aes(x = season, y = R_per_9I)) +
-  geom_area(aes(y = hrs_per_9I * 3.5), fill = "gray20", alpha = .10) +
-  geom_line(aes(y = R_per_9I), color = "#003831", linewidth = 1) +
-  geom_point(aes(y = if_else(season %in% lbl_yr, R_per_9I, NA_real_)), 
-             color = "#fd5a1e", size = 2) +
-  geom_text(aes(x = season + 3, 
-                y = if_else(season %in% lbl_yr, R_per_9I, NA_real_), 
-                label = comma(R_per_9I, .1)),
-            family = "Rockwell", size = 3.5, color = "#fd5a1e", hjust = 0) +
+mlb_season_ts %>%
+  ggplot(aes(x = season)) +
+  geom_area(aes(y = hrs_per_9 * 30), fill = "gray20", alpha = .10) +
+  geom_line(aes(y = PA_per_9), linewidth = 1) +
   scale_x_continuous(breaks = seq(1900, 2030, 10)) +
-  scale_y_continuous(limits = c(0, NA)) +
-  # coord_cartesian(xlim = c(1900, 2030), ylim = c(0, 3.5)) +
+  scale_y_continuous(
+    limits = c(0, NA), 
+    sec.axis = sec_axis(trans = ~ . / 30, labels = comma_format(.1), breaks = 25/30 * c(1:4), name = "hours per 9")
+  ) +
   labs(
-    title = "Runs per nine innings",
-    subtitle = "against backdrop of average game time.",
-    caption = "Source: MLB Stats API.",
-    x = NULL, y = NULL
+    title = "Plate appearances have not changed much.",
+    subtitle = "Plate appearances (line) and game duration (shaded), per nine-innings.",
+    x = NULL, y = "PA per 9 innings", color = NULL
   )
 ```
 
-### Hits
+<font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`. Plate appearances (line) and game duration (shaded), per nine-innings</b>. The amount of game activity, summarized here by plate appearances, has changed little and is an unlikely explanation for the long term trend in game duration.<br> source: MLB Stats API.</font>
 
-### Strikeouts
+### Walks, Hits, K's
 
-### Walks
+```{r}
+mlb_season_ts %>%
+  pivot_longer(cols = c(H_per_9, K_per_9, BB_per_9)) %>%
+  ggplot(aes(x = season)) +
+  geom_area(data = mlb_season_ts, aes(y = hrs_per_9 * 6.5), fill = "gray20", alpha = .10) +
+  geom_line(aes(y = value, color = name), linewidth = 1) +
+  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
+  scale_y_continuous(
+    limits = c(0, NA), 
+    sec.axis = sec_axis(trans = ~ . / 6.5, labels = comma_format(.1), breaks = 5/6.5 * c(1:4), name = "hours per 9")
+  ) +
+  scale_color_discrete(labels = c(BB_per_9 = "Walks", H_per_9 = "Hits", K_per_9 = "K's", R_per_9 = "Runs")) +
+  labs(
+    title = "Strikeouts are correlated with game duration.",
+    subtitle = "Offensive metrics (lines) and game duration (shaded), per nine-innings.",
+    x = NULL, y = "Count per 9 innings", color = NULL
+  )
+```
 
+<font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`. Offensive metrics (lines) and game duration (shaded), per nine-innings</b>. Of the main offense metrics, strikeouts come closest to matching the trend in game duration. In fact, strikeouts alone explain about `r percent(r2_K, 1)` of the variation in average game duration. Strikeouts climbed gradually after the dead-ball era, then more sharply after WWII. They declined from the mid-60's to 1980, but have climbed since then, peaking at `r comma(max_K[1, ]$K_per_9, .1)` in `r max_K[1, ]$season`.<br>Source: MLB Stats API.</font>
 
+### K-Duration Correlation
 
-## Pitchers {.tabset}
+```{r warning=FALSE}
+bind_cols(
+  mlb_season_ts[, c("season", "K_per_9")], 
+  broom::augment(lm_K)
+) %>%
+  mutate(influential = .cooksd > 4 * mean(.cooksd)) %>%
+  ggplot(aes(x = log(K_per_9), y = hrs_per_9)) +
+  geom_point(aes(color = influential), show.legend = FALSE) +
+  geom_text_repel(aes(label = if_else(influential, season, NA_real_))) +
+  geom_smooth(method = "lm", formula = "y ~ x") +
+  labs(
+    title = "Strikeouts are correlated with longer game times.",
+    subtitle = glue("Adjusted R2 = {comma(glance(lm_K)[1, ]$adj.r.squared, .01)}."),
+    x = "K's per 9 (log)", y = "hours per 9"
+  )
+```
+
+<font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`. Log of strikeouts per nine innings vs game duration</b>. Blue labeled points are influential. Fit line shows evidence of autocorrelation, suggesting there are other factors influencing game times. R-squared is `r comma(r2_K, .01)`. <b>Source</b>: MLB Stats API.</font>
+
+## Pitching {.tabset}
 
 From 1901-1990, each pitching change was associated with about 20 minutes of additional game time. After 1990 the number of pitchers used per game continued to increase while game duration leveled off. After 1990 each pitching change is associated with about 6 minutes of additional game time. 20 minutes per additional pitcher seems high, even if you factor in a mound visit from the pitching coach to buy time for the reliever to warm up. This and the post-1990 divergence suggests there is another factor, something often correlated with the number of pitchers used, but ultimately independent of it.
 
@@ -735,25 +778,25 @@ From 1901-1990, each pitching change was associated with about 20 minutes of add
 
 ```{r warning=FALSE}
 lbl_yr <- c(1901, 2023)
-mlb_season_ts_4 %>%
+mlb_season_ts %>%
   mutate(
-    std_hrs_per_9I = hrs_per_9I / mean(hrs_per_9I),
-    std_pitchers_per_9I = pitchers_per_9I / mean(pitchers_per_9I),
+    std_hrs_per_9 = hrs_per_9 / mean(hrs_per_9),
+    std_pitchers_per_9 = pitchers_per_9 / mean(pitchers_per_9),
     # std_min_per_pitcher = min_per_pitcher / mean(min_per_pitcher)
   ) %>%
   ggplot(aes(x = season)) +
-  geom_area(aes(y = std_hrs_per_9I), fill = "gray20", alpha = .10) +
-  geom_line(aes(y = std_pitchers_per_9I), color = "#003831", linewidth = 1) +
+  geom_area(aes(y = std_hrs_per_9), fill = "gray20", alpha = .10) +
+  geom_line(aes(y = std_pitchers_per_9), color = "#003831", linewidth = 1) +
   # # geom_line(aes(y = std_min_per_pitcher), color = "#efb21e", linewidth = 1) +
-  geom_point(aes(y = if_else(season %in% lbl_yr, std_pitchers_per_9I, NA_real_)),
+  geom_point(aes(y = if_else(season %in% lbl_yr, std_pitchers_per_9, NA_real_)),
              color = "#fd5a1e", size = 2) +
   geom_text(aes(x = season + 1,
-                y = if_else(season %in% lbl_yr, std_pitchers_per_9I + .1, NA_real_),
-                label = comma(pitchers_per_9I, .1)),
+                y = if_else(season %in% lbl_yr, std_pitchers_per_9 + .1, NA_real_),
+                label = comma(pitchers_per_9, .1)),
             family = "Rockwell", size = 3.5, color = "#fd5a1e", hjust = 0) +
   scale_x_continuous(breaks = seq(1900, 2030, 10)) +
-  scale_y_continuous(breaks = seq(0, 10, 1) / mean(mlb_season_ts_4$pitchers_per_9I), 
-                     labels = ~ comma(.x * mean(mlb_season_ts_4$pitchers_per_9I), 1)) +
+  scale_y_continuous(breaks = seq(0, 10, 1) / mean(mlb_season_ts$pitchers_per_9), 
+                     labels = ~ comma(.x * mean(mlb_season_ts$pitchers_per_9), 1)) +
   coord_cartesian(xlim = c(1900, 2030), ylim = c(0, NA)) +
   # theme(axis.text.y = element_blank()) +
   labs(
@@ -764,61 +807,101 @@ mlb_season_ts_4 %>%
   )
 ```
 
-### 1901-1990
+### Scatter
 
-```{r echo=TRUE}
-mlb_season_ts_4 %>% 
-  filter(season <= 1990) %>% 
-  # Shift baseline to 2 pitchers per game
-  mutate(pitchers_per_9I = pitchers_per_9I - 2) %>% 
-  model(TSLM(hrs_per_9I ~ pitchers_per_9I)) %>% 
-  report()
+```{r}
+lm_pitchers <- lm(hrs_per_9 ~ pitchers_per_9, data = mlb_season_ts)
+r2_pitchers <- broom::glance(lm_pitchers) %>% pull(adj.r.squared)
+mlb_season_ts %>%
+  ggplot(aes(x = pitchers_per_9, y = hrs_per_9)) + 
+  geom_point() +
+  geom_smooth(method = "lm", formula = "y ~ x") +
+  labs(
+    title = "Strikeouts are correlated with longer game times.",
+    subtitle = glue("Adjusted R2 = {comma(glance(lm_pitchers)[1, ]$adj.r.squared, .01)}."),
+    x = "Pitchers per 9", y = "hours per 9"
+  )
 ```
 
-### 1991-2023
+### Pitchers + K
 
-```{r echo=TRUE}
-mlb_season_ts_4 %>% 
-  filter(season >= 1991) %>% 
-  # Shift baseline to 2 pitchers per game
-  mutate(pitchers_per_9I = pitchers_per_9I - 2) %>% 
-  model(TSLM(hrs_per_9I ~ pitchers_per_9I)) %>%
-  report()
+```{r}
+lm_pK <- lm(hrs_per_9 ~ log(K_per_9) + pitchers_per_9, data = mlb_season_ts)
+r2_pK <- broom::glance(lm_pK) %>% pull(adj.r.squared)
+lm_pK %>%
+  augment() %>%
+  ggplot(aes(x = pitchers_per_9, y = hrs_per_9)) + 
+  geom_point() +
+  geom_line(aes(y = .fitted)) +
+  labs(
+    title = "Strikeouts are correlated with longer game times.",
+    subtitle = glue("Adjusted R2 = {comma(glance(lm_pitchers)[1, ]$adj.r.squared, .01)}."),
+    x = "Pitchers per 9", y = "hours per 9"
+  )
 ```
+
+## Stolen Bases
+
+```{r warning=FALSE}
+interesting <- c(1987, 2023)
+mlb_season_ts %>%
+  ggplot(aes(x = season)) +
+  geom_area(aes(y = SB_per_9 / (SB_per_9 + CS_per_9) * 4), 
+            fill = "gray40", color="gray40", alpha = .05) +
+  geom_point(aes(y = SB_per_9 + CS_per_9, color = season %in% interesting), show.legend = FALSE) +
+  geom_text(
+    data = mlb_season_ts %>% filter(season %in% interesting), 
+    aes(y = SB_per_9 + CS_per_9 + .4, 
+        label = glue("{comma(SB_per_9 + CS_per_9, .1)}\n{percent(SB_per_9 / (SB_per_9 + CS_per_9), .1)}")),
+    size = 3.5, family = "Rockwell Condensed", color = "#fd5a1e"
+    ) +
+  scale_y_continuous(
+    limits = c(0, 4), 
+    sec.axis = sec_axis(trans = ~ ./4, labels = percent_format(1), name = "Success Rate")
+  ) +
+  scale_color_manual(values = c("#003831", "#fd5a1e")) +
+  labs(
+    title = "Stolen base attempts and success rate up in 2023.",
+    subtitle = "Stolen bases per nine innings (points) and success rate (area).",
+    x = NULL, y = "Stolen Bases"
+  )
+```
+
+<font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`. Stolen base attempts and success rate</b>. Attempts and success rate are up in 2023, but attempts are still well below modern era max in 1987. <b>Source</b>: MLB Stats API.</font>
 
 ## Plate Appearances
 
 ```{r warning=FALSE}
 lbl_yr <- c(1901, 2023)
-mlb_season_ts_4 %>%
+mlb_season_ts %>%
   mutate(
-    std_hrs_per_9I = hrs_per_9I / mean(hrs_per_9I),
-    std_PA_per_9I = PA_per_9I / mean(PA_per_9I),
+    std_hrs_per_9 = hrs_per_9 / mean(hrs_per_9),
+    std_PA_per_9 = PA_per_9 / mean(PA_per_9),
   ) %>%
   ggplot(aes(x = season)) +
-  geom_area(aes(y = std_hrs_per_9I), fill = "gray20", alpha = .10) +
-  geom_line(aes(y = std_PA_per_9I), color = "#003831", linewidth = 1) +
+  geom_area(aes(y = std_hrs_per_9), fill = "gray20", alpha = .10) +
+  geom_line(aes(y = std_PA_per_9), color = "#003831", linewidth = 1) +
   # # geom_line(aes(y = std_min_per_pitcher), color = "#efb21e", linewidth = 1) +
-  geom_point(aes(y = if_else(season %in% lbl_yr, std_PA_per_9I, NA_real_)),
+  geom_point(aes(y = if_else(season %in% lbl_yr, std_PA_per_9, NA_real_)),
              color = "#fd5a1e", size = 2) +
   geom_text(aes(x = season + 1,
-                y = if_else(season %in% lbl_yr, std_PA_per_9I + .1, NA_real_),
-                label = comma(PA_per_9I, .1)),
+                y = if_else(season %in% lbl_yr, std_PA_per_9 + .1, NA_real_),
+                label = comma(PA_per_9, .1)),
             family = "Rockwell", size = 3.5, color = "#fd5a1e", hjust = 0) +
   scale_x_continuous(breaks = seq(1900, 2030, 10)) +
-  scale_y_continuous(breaks = seq(0, 10, 2.5) / mean(mlb_season_ts_4$pitchers_per_9I), 
-                     labels = ~ comma(.x * mean(mlb_season_ts_4$pitchers_per_9I), .1)) +
+  scale_y_continuous(breaks = seq(0, 10, 2.5) / mean(mlb_season_ts$pitchers_per_9), 
+                     labels = ~ comma(.x * mean(mlb_season_ts$pitchers_per_9), .1)) +
   coord_cartesian(xlim = c(1900, 2030), ylim = c(0, NA)) +
   # theme(axis.text.y = element_blank()) +
   labs(
-    title = "Pitchers per per nine innings",
+    title = "Plate Appearances per per nine innings",
     subtitle = "against backdrop of average game time.",
     caption = "Source: MLB Stats API.",
     x = NULL, y = NULL
   )
 ```
 
-## Pitches
+## Pitches {.tabset}
 
 https://www.baseball-reference.com/bullpen/Pace_of_play
 https://sabr.org/journal/article/why-do-games-take-so-long/
@@ -826,25 +909,27 @@ https://www.retrosheet.org/gamelogs/glfields.txt
 
 David Smith (2018) concluded a rising pitch count is the predominant driver of game time.^[David W. Smith: "Why Do Games Take So Long?", Baseball Research Journal, SABR, Vol. 47, Nr. 2 (Fall 2018), pp. 64-69. [html](https://sabr.org/journal/article/why-do-games-take-so-long/).] Smith relied on [Retrosheet](https://www.retrosheet.org/) for most of his analysis, but used other data for pitch counts. I used Retrosheet data in [my study on baseball player longevity](https://mpfoley73.github.io/baseball-survival/1_full_analysis.html).
 
+### Trend
+
 ```{r warning=FALSE}
-lbl_yr <- c(1930, 1968, 2000, 2023)
-mlb_season_ts_4 %>%
+lbl_yr <- c(1988, 2023)
+mlb_season_ts %>%
   mutate(
-    std_hrs_per_9I = hrs_per_9I / mean(hrs_per_9I),
-    std_P_per_9I = P_per_9I / mean(P_per_9I, na.rm = TRUE),
+    std_hrs_per_9 = hrs_per_9 / mean(hrs_per_9),
+    std_P_per_9 = P_per_9 / mean(P_per_9, na.rm = TRUE),
   ) %>%
-  ggplot(aes(x = season, y = P_per_9I)) +
-  geom_area(aes(y = std_hrs_per_9I), fill = "gray20", alpha = .10) +
-  geom_line(aes(y = std_P_per_9I), color = "#003831", linewidth = 1) +
-  geom_point(aes(y = if_else(season %in% lbl_yr, std_P_per_9I, NA_real_)), 
+  ggplot(aes(x = season, y = P_per_9)) +
+  geom_area(aes(y = std_hrs_per_9), fill = "gray20", alpha = .10) +
+  geom_line(aes(y = std_P_per_9), color = "#003831", linewidth = 1) +
+  geom_point(aes(y = if_else(season %in% lbl_yr, std_P_per_9, NA_real_)), 
              color = "#fd5a1e", size = 2) +
   geom_text(aes(x = season + 3, 
-                y = if_else(season %in% lbl_yr, std_P_per_9I + .1, NA_real_), 
-                label = comma(P_per_9I, .1)),
+                y = if_else(season %in% lbl_yr, std_P_per_9 + .1, NA_real_), 
+                label = comma(P_per_9, .1)),
             family = "Rockwell", size = 3.5, color = "#fd5a1e", hjust = 0) +
   scale_x_continuous(breaks = seq(1900, 2030, 10)) +
-  scale_y_continuous(breaks = seq(0, 10, 2.5) / mean(mlb_season_ts_4$P_per_9I), 
-                     labels = ~ comma(.x * mean(mlb_season_ts_4$P_per_9I), .1)) +
+  scale_y_continuous(breaks = seq(0, 10, 2.5) / mean(mlb_season_ts$P_per_9), 
+                     labels = ~ comma(.x * mean(mlb_season_ts$P_per_9), .1)) +
   coord_cartesian(xlim = c(1900, 2030), ylim = c(0, NA)) +
   labs(
     title = "Pitches per nine innings",
@@ -854,8 +939,19 @@ mlb_season_ts_4 %>%
   )
 ```
 
-```{r}
+### Scatter 
 
+```{r}
+mlb_season_ts %>% filter(season >= 1989) %>% model(TSLM(P_per_9 ~ K_per_9 + trend())) %>% report()
+mlb_season_ts %>% filter(season >= 1989) %>% model(TSLM(hrs_per_9 ~ P_per_9)) %>% report()
+mlb_season_ts %>%
+  filter(season >= 1989) %>%
+  ggplot(aes(x = K_per_9, y = P_per_9)) +
+  geom_point()
+mlb_season_ts %>%
+  filter(season >= 1989) %>%
+  ggplot(aes(x = P_per_9, y = hrs_per_9)) +
+  geom_point()
 ```
 
 
@@ -891,13 +987,13 @@ cle_season_ts %>%
 ## Correlation Matrix
 
 ```{r}
-mlb_season_ts_4 %>% 
-  select(ends_with("per_9I"), -dur_per_9I) %>%
+mlb_season_ts %>% 
+  select(ends_with("per_9"), -dur_per_9) %>%
   cor()
 
-mlb_season_ts_4 %>% 
-  filter(!is.na(P_per_9I)) %>%
-  select(ends_with("per_9I"), -dur_per_9I) %>%
+mlb_season_ts %>% 
+  filter(!is.na(P_per_9)) %>%
+  select(ends_with("per_9"), -dur_per_9) %>%
   cor()
 ```
 
@@ -936,3 +1032,11 @@ saveRDS(mlb_season_ts, "../data/mlb_season_ts.rds")
 ```
 
 https://www.nyseconomicsassociation.org/wp-content/uploads/2022/06/nyer-sports-2020.pdf#page=24
+https://sabr.org/journal/article/why-do-games-take-so-long/
+https://github.com/BillPetti/baseballr/blob/master/R/retrosheet_data.R
+https://retrosheet.org/Research/SmithD/Relief%20Pitchers%20from%20Exile%20to%20Specialist.pdf
+https://fivethirtyeight.com/features/relievers-have-broken-baseball-we-have-a-plan-to-fix-it/
+https://www.pitcherlist.com/retrosheet-play-by-play-data-at-your-fingertips/
+https://techgraphs.fangraphs.com/tag/retrosheet/
+
+

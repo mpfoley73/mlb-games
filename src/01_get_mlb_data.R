@@ -115,7 +115,7 @@ mlb_batting <- mlb_batting_agg_raw %>%
     BA = stat_avg, AB = stat_at_bats, SLG = stat_slg, OPS = stat_ops, 
     SB = stat_stolen_bases, CS = stat_caught_stealing, 
     PA = stat_plate_appearances, OBP = stat_obp, TB = stat_total_bases,
-    RBI = stat_rbi, sac_bunts = stat_sac_bunts, pitches = stat_number_of_pitches,
+    RBI = stat_rbi, sac_bunts = stat_sac_bunts, P = stat_number_of_pitches,
     K = stat_strike_outs
   )
 
@@ -134,9 +134,10 @@ mlb_pitching <- mlb_pitching_agg_raw %>%
     OBP = stat_obp, ERA = stat_era, IP = stat_innings_pitched,
     W = stat_wins, L = stat_losses, SV = stat_saves, ER = stat_earned_runs, 
     WHIP = stat_whip, BF = stat_batters_faced, outs = stat_outs, 
-    games_pitched = stat_games_pitched, CG = stat_complete_games, 
+    CG = stat_complete_games, P = stat_number_of_pitches,
+    strikes = stat_strikes,
     shutouts = stat_shutouts, balks = stat_balks,
-    wild_pitches = stat_wild_pitches, games_finished = stat_games_finished
+    wild_pitches = stat_wild_pitches
   )
 
 # Save final data frame.
