@@ -17,6 +17,7 @@ library(readxl)
 # Seasons to download and process. Retrosheet explains that all seasons are
 # subject to change (https://www.retrosheet.org/game.htm#Notice). Might be worth
 # a re-run. Currently available: 1914-2022.
+chadwick_dir <- "C:\\Users\\mpfol\\OneDrive\\Documents\\GitHub\\mlb-games\\assets\\chadwick"
 retro_yrs <- 1941:2022
 wd <- getwd()
 
@@ -46,13 +47,13 @@ team_col_names <- c("TEAM_ID", "LEAGUE_ID", "TEAM_CITY", "TEAM_NAME")
 team_col_types <- c("cccc")
 for (season in retro_yrs) {
   # Create event[YYYY].csv.
-  cwevent_cmd <- glue("cwevent -y {season} -f 0-96 -x 0-60 -q -n {season}*.EV* > event{season}.csv")
+  cwevent_cmd <- glue("{file.path(chadwick_dir, 'cwevent')} -y {season} -f 0-96 -x 0-60 -q -n {season}*.EV* > event{season}.csv")
   shell(cwevent_cmd)
   # Create sub[YYYY].csv.
-  cwsub_cmd <- glue("cwsub -y {season} -q -n {season}*.EV* > sub{season}.csv")
+  cwsub_cmd <- glue("{file.path(chadwick_dir, 'cwsub')} -y {season} -q -n {season}*.EV* > sub{season}.csv")
   shell(cwsub_cmd)
   # Create game[YYYY].csv.
-  cwgame_cmd <- glue("cwgame -y {season} -f 0-83 -x 0-96 -q -n {season}*.EV* > game{season}.csv")
+  cwgame_cmd <- glue("{file.path(chadwick_dir, 'cwgame')} -y {season} -f 0-83 -x 0-96 -q -n {season}*.EV* > game{season}.csv")
   shell(cwgame_cmd)
   # Create roster[YYYY].csv from individual team files. File names are like 
   # CLE1973.ROS, one for each team.
@@ -143,7 +144,7 @@ dbSendStatement(retrosheet_conn, "alter table team add primary key (team_id(3), 
 dbSendStatement(retrosheet_conn, "delete from team_roster where team_id = 'OAK' and year_id = 2006 and player_id = 'kigem001' and pos = 'X'")
 dbSendStatement(retrosheet_conn, "alter table team_roster add primary key (team_id(3), year_id, player_id(8))")
 # (no unique key for player_sub)
-dbSendStatement(retrosheet_conn, "create index sub_game on player_sub (game_id(12))")
+dbSendStatement(retrosheet_conn, "create index sub_game_event on player_sub (game_id(12), event_id)")
 dbSendStatement(retrosheet_conn, "alter table event_lu add primary key (event_cd)")
 # Other indexes for performance
 dbSendStatement(retrosheet_conn, 'create index game_year on game (year_id)')
