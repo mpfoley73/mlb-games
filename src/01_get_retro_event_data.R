@@ -132,7 +132,7 @@ setwd(wd)
 dbSendStatement(retrosheet_conn, "update game set minutes_game_ct = NULL where minutes_game_ct = 0")
 dbSendStatement(retrosheet_conn, "update game set attend_park_ct  = NULL where attend_park_ct  = 0")
 # Add lookups. Got this from https://chadwick.readthedocs.io/en/latest/cwevent.html.
-lu_df <- read_xlsx(file.path(wd, "assets/chadwick/code_lookup.xlsx"))
+lu_df <- read_xlsx(file.path(event_dir, "code_lookup.xlsx"))
 colnames(lu_df) <- c("event_cd", "event_tx")
 dbWriteTable(retrosheet_conn, "event_lu",  lu_df, overwrite = TRUE, append = FALSE, row.names = FALSE)
 # Create indexes per recommendation from
