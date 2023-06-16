@@ -65,6 +65,7 @@ mlb_pitching <- readRDS("../data/mlb_pitching.rds")
 
 # Data from Retrosheet
 retro_logs <- readRDS("../data/retro_logs.rds")
+retro_games <- readRDS("../data/retro_game_logs.rds")
 ```
 
 #### Baseball-Reference
@@ -267,6 +268,87 @@ mlb_season_ts_0 <- mlb_pace_ts %>%
   relocate(K, .after = "BB")
 ```
 
+```{r}
+retro_season_all <- retro_games %>%
+  summarise(
+    .by = year_id,
+    G = n(),
+    avg_mins_G = mean(minutes_game_ct, na.rm = TRUE),
+    avg_mins_I = mean(minutes_game_ct / inn_ct, na.rm = TRUE),
+    non_na_mins_G = sum(!is.na(minutes_game_ct)),
+    avg_att = mean(attend_park_ct, na.rm = TRUE),
+    non_na_att_G = sum(!is.na(attend_park_ct)),
+    pitchers = sum(away_pitcher_ct + home_pitcher_ct),
+    mi_p_subs = sum(mid_inning_pitcher_sub_ct),
+    I = sum(inn_ct),
+    R = sum(away_score_ct + home_score_ct),
+    H = sum(away_hits_ct + home_hits_ct),
+    E = sum(away_err_ct + home_err_ct),
+    lob = sum(home_lob_ct + away_lob_ct),
+    outs = sum(outs_ct),
+    AB = sum(away_ab_ct + home_ab_ct),
+    H2 = sum(away_2b_ct + home_2b_ct),
+    H3 = sum(away_3b_ct + home_3b_ct),
+    H4 = sum(away_hr_ct + home_hr_ct),
+    RBI = sum(away_bi_ct + home_bi_ct),
+    SH = sum(away_sh_ct + home_sh_ct),
+    SF = sum(away_sf_ct + home_sf_ct),
+    SB = sum(away_sb_ct + home_sb_ct),
+    HBP = sum(away_hp_ct + home_hp_ct),
+    BB = sum(away_bb_ct + home_bb_ct),
+    IBB = sum(away_ibb_ct + home_ibb_ct),
+    K = sum(away_so_ct + home_so_ct),
+    SB = sum(away_sb_ct + home_sb_ct),
+    CS = sum(away_cs_ct + home_cs_ct),
+    PA = AB + BB + SH
+  )
+
+# retro_season_all
+    
+retro_season_cle <- retro_games %>%
+  filter(home_team_id == "CLE" | away_team_id == "CLE") %>%
+  summarize(
+    .by = year_id,
+    G = n(),
+    avg_mins_G = mean(minutes_game_ct, na.rm = TRUE),
+    avg_mins_I = mean(minutes_game_ct / inn_ct, na.rm = TRUE),
+    non_na_mins_G = sum(!is.na(minutes_game_ct)),
+    avg_home_att = mean(if_else(home_team_id == "CLE", attend_park_ct, NA_real_), na.rm = TRUE),
+    non_na_att_G = sum(home_team_id == "CLE" & !is.na(attend_park_ct)),
+    pitchers = sum(away_pitcher_ct + home_pitcher_ct),
+    mi_p_subs = sum(mid_inning_pitcher_sub_ct),
+    I = sum(inn_ct),
+    R = sum(away_score_ct + home_score_ct),
+    H = sum(away_hits_ct + home_hits_ct),
+    E = sum(away_err_ct + home_err_ct),
+    lob = sum(home_lob_ct + away_lob_ct),
+    outs = sum(outs_ct),
+    AB = sum(away_ab_ct + home_ab_ct),
+    H2 = sum(away_2b_ct + home_2b_ct),
+    H3 = sum(away_3b_ct + home_3b_ct),
+    H4 = sum(away_hr_ct + home_hr_ct),
+    RBI = sum(away_bi_ct + home_bi_ct),
+    SH = sum(away_sh_ct + home_sh_ct),
+    SF = sum(away_sf_ct + home_sf_ct),
+    SB = sum(away_sb_ct + home_sb_ct),
+    HBP = sum(away_hp_ct + home_hp_ct),
+    BB = sum(away_bb_ct + home_bb_ct),
+    IBB = sum(away_ibb_ct + home_ibb_ct),
+    K = sum(away_so_ct + home_so_ct),
+    SB = sum(away_sb_ct + home_sb_ct),
+    CS = sum(away_cs_ct + home_cs_ct),
+    PA = AB + BB + SH
+  )
+
+# retro_season_cle
+# 
+# retro_games %>% str()
+
+retro_season_cle %>%
+  tsibble(index = year_id)
+```
+
+
 # Coverage and Quality {.tabset .tabset-fade .tabset-pills}
 
 Almost all features are fully populated, but there are several exceptions.
@@ -306,6 +388,32 @@ cle_games_ts %>%
 ```
 
 <font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`. Cleveland home games with no recorded attendance</b>. Data is not reliably recorded until 1937. Note that the 2020 season was partial and played with no in-person spectators due to the Covid pandemic.<br>Source: www.baseball-reference.com.</font>
+
+## CLE Attend 2
+
+```{r}
+library(odbc)
+retrosheet_conn <- dbConnect(
+  RMySQL::MySQL(),
+  dbname = "retrosheet",
+  host = "localhost",
+  port = 3306,
+  user = "root",
+  password = "password" 
+)
+
+retro_game <- tbl(retrosheet_conn, "game")
+cle_att <- retro_game %>% 
+  filter(home_team_id == "CLE") %>%
+  select(year_id, attend_park_ct) %>%
+  collect()
+cle_att %>% filter(is.na(attend_park_ct))
+cle_att %>%
+  filter(!is.na(attend_park_ct)) %>%
+  summarize(.by = year_id, att = mean(attend_park_ct, na.rm = TRUE)) %>%
+  ggplot(aes(x = year_id, y = att)) + geom_line()
+```
+
 
 ## CLE Duration
 

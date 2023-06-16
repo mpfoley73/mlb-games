@@ -7,6 +7,7 @@
 ## 2. Run Chadwick to create csv files.
 ## 3. Insert into MySQL database.
 ## 4. Post-processing
+## 5. Create an RDS for analysis
 
 library(tidyverse)
 library(odbc)
@@ -32,7 +33,7 @@ for (season in retro_yrs) {
   shell(glue("del {zip_fn}"))
 }
 
-# 2. Run Chadwick to create csv files:
+# 2. Run Chadwick to create csv files: -----------------------------------------
 #  - event[YYYY].csv,
 #  - sub[YYYY].csv,
 #  - game[YYYY].csv,
@@ -70,7 +71,7 @@ for (season in retro_yrs) {
   shell(glue("del TEAM{season}"))
 }
 
-# 3. Insert into MySQL database.
+# 3. Insert into MySQL database. -----------------------------------------------
 # At this point you have one or more event[YYYY].csv, sub[YYYY].csv, 
 # game[YYYY], roster[YYYY].csv, and team[YYYY].csv files. Read each file, add a 
 # year_id col, and insert into MySQL.
@@ -127,7 +128,7 @@ for (season in retro_yrs) {
 
 setwd(wd)
 
-# 4. Post-processing
+# 4. Post-processing -----------------------------------------------------------
 # Address data issues. Some unknown values default to 0.
 dbSendStatement(retrosheet_conn, "update game set minutes_game_ct = NULL where minutes_game_ct = 0")
 dbSendStatement(retrosheet_conn, "update game set attend_park_ct  = NULL where attend_park_ct  = 0")
@@ -164,3 +165,45 @@ dbSendStatement(retrosheet_conn, 'create index event_away_team_id on game_event 
 dbSendStatement(retrosheet_conn, 'create index event_event_cd on game_event (event_cd)')
 # dbSendStatement(retrosheet_conn, 'create index event_event_outs_ct on event (event_outs_ct)')
 # dbSendStatement(retrosheet_conn, 'create index event_inn_ct on event (inn_ct)')
+
+# 5. Create RDS ----------------------------------------------------------------
+# The game table has most of what I want. I also want mid-inning pitching 
+# substitutions.
+game <- tbl(retrosheet_conn, "game")
+
+game_logs_0 <- game %>% 
+  select(-starts_with(c("away_lineup", "home_lineup")), 
+         -ends_with(c("_name_tx", "ump_id", "pit_id", "manager_id", "info_tx")),
+         -contains(c("_record_")),
+         -c("goahead_rbi_id")) %>%
+  collect()
+
+game_logs_1 <- game_logs_0 %>%
+  mutate(
+    game_dt = ymd(game_dt),
+    dur = duration(minutes_game_ct, units = "minutes")
+  )
+
+pitcher_chgs <- dbGetQuery(
+  retrosheet_conn,
+  "select
+    e.game_id,
+	  sum(case when e.inn_pa_ct > 0 then 1 else 0 end) as mid_inning_pitcher_sub_ct 
+  from (select game_id, event_id, inn_pa_ct from retrosheet.game_event) e
+	  inner join (select game_id, event_id from retrosheet.player_sub where removed_fld_cd = 1) s
+      on e.game_id = s.game_id and e.event_id = s.event_id 
+  group by e.game_id"
+)
+
+# pa <- dbGetQuery(
+#   retrosheet_conn,
+#   "select game_id, max(game_pa_ct) as pa_ct from game_event group by game_id"
+# )
+
+game_logs <- game_logs_1 %>%
+  left_join(pitcher_chgs, by = join_by(game_id)) %>%
+  replace_na(list(mid_inning_pitcher_subs = 0))
+
+# Save final data frame.
+#
+saveRDS(game_logs, file.path("data", "retro_game_logs.rds"))
