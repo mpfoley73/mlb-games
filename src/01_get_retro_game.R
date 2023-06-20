@@ -175,7 +175,7 @@ data_dictionary <- tribble(
 
 # Aggregate all the raw data sets into a single data frame.
 retro_logs_raw <- map_df(
-  list.files("data/retrosheet"),
+  list.files("data/retrosheet/game"),
   ~read_csv(
     file.path("data/retrosheet", .x),
     col_names = c(data_dictionary$col_name, paste0("c", (nrow(data_dictionary)+1):161)),
@@ -192,4 +192,4 @@ retro_logs <- retro_logs_raw %>%
 
 # Save final data frame.
 #
-saveRDS(retro_logs, file.path("data", "retro_logs.rds"))
+saveRDS(retro_logs, file.path("data", "retro_game.rds"))

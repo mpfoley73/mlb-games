@@ -72,19 +72,19 @@ if (length(season) > 1) {
 }
 
 fn <- glue("mlb_pace_{dt_range}_raw.rds")
-saveRDS(mlb_pace_raw, file.path("data", "mlb", fn))
+saveRDS(mlb_pace_raw, file.path(proj_dir, "data/mlb", fn))
 fn <- glue("mlb_batting_{dt_range}_raw.rds")
-saveRDS(mlb_batting_raw, file.path("data", "mlb", fn))
+saveRDS(mlb_batting_raw, file.path(proj_dir, "data/mlb", fn))
 fn <- glue("mlb_pitching_{dt_range}_raw.rds")
-saveRDS(mlb_pitching_raw, file.path("data", "mlb", fn))
+saveRDS(mlb_pitching_raw, file.path(proj_dir, "data/mlb", fn))
 
 # Aggregate all the raw data sets into a single data frame and clean.
-fns <- list.files(path = "data/mlb", pattern = "^mlb_pace_.*_raw.rds$")
-mlb_pace_agg_raw <- map_df(fns, ~readRDS(file.path("data/mlb", .x)))
-fns <- list.files(path = "data/mlb", pattern = "^mlb_batting_.*_raw.rds$")
-mlb_batting_agg_raw <- map_df(fns, ~readRDS(file.path("data/mlb", .x)))
-fns <- list.files(path = "data/mlb", pattern = "^mlb_pitching_.*_raw.rds$")
-mlb_pitching_agg_raw <- map_df(fns, ~readRDS(file.path("data/mlb", .x)))
+fns <- list.files(path = file.path(proj_dir, "data/mlb"), pattern = "^mlb_pace_.*_raw.rds$")
+mlb_pace_agg_raw <- map_df(fns, ~readRDS(file.path(proj_dir, "data/mlb", .x)))
+fns <- list.files(path = file.path(proj_dir, "data/mlb"), pattern = "^mlb_batting_.*_raw.rds$")
+mlb_batting_agg_raw <- map_df(fns, ~readRDS(file.path(proj_dir, "data/mlb", .x)))
+fns <- list.files(path = file.path(proj_dir, "data/mlb"), pattern = "^mlb_pitching_.*_raw.rds$")
+mlb_pitching_agg_raw <- map_df(fns, ~readRDS(file.path(proj_dir, "data/mlb", .x)))
 
 # Clean the data
 mlb_pace <- mlb_pace_agg_raw %>%
@@ -141,6 +141,6 @@ mlb_pitching <- mlb_pitching_agg_raw %>%
   )
 
 # Save final data frame.
-saveRDS(mlb_pace, file.path("data", "mlb_pace.rds"))
-saveRDS(mlb_batting, file.path("data", "mlb_batting.rds"))
-saveRDS(mlb_pitching, file.path("data", "mlb_pitching.rds"))
+saveRDS(mlb_pace, file.path(proj_dir, "data", "mlb_pace.rds"))
+saveRDS(mlb_batting, file.path(proj_dir, "data", "mlb_batting.rds"))
+saveRDS(mlb_pitching, file.path(proj_dir, "data", "mlb_pitching.rds"))

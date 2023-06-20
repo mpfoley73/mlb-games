@@ -206,4 +206,4 @@ game_logs <- game_logs_1 %>%
 
 # Save final data frame.
 #
-saveRDS(game_logs, file.path("data", "retro_game_logs.rds"))
+saveRDS(game_logs, file.path("data", "retro_event.rds"))

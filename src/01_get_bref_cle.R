@@ -68,23 +68,23 @@ if (length(season) > 1) {
 }
 
 fn <- glue("cle_games_{dt_range}_raw.rds")
-saveRDS(cle_games_raw, file.path("data", "bref", fn))
+saveRDS(cle_games_raw, file.path(proj_dir, "data/bref", fn))
 
 fn <- glue("cle_batting_{dt_range}_raw.rds")
-saveRDS(cle_batting_raw, file.path("data", "bref", fn))
+saveRDS(cle_batting_raw, file.path(proj_dir, "data/bref", fn))
 
 fn <- glue("cle_pitching_{dt_range}_raw.rds")
-saveRDS(cle_pitching_raw, file.path("data", "bref", fn))
+saveRDS(cle_pitching_raw, file.path(proj_dir, "data/bref", fn))
 
 # Aggregate all the raw data sets into a single data frame and clean.
-fns <- list.files(path = "data/bref", pattern = "^cle_games_.*_raw.rds$")
-cle_games_agg_raw <- map_df(fns, ~readRDS(file.path("data", .x)))
+fns <- list.files(file.path(proj_dir, "data/bref"), pattern = "^cle_games_.*_raw.rds$")
+cle_games_agg_raw <- map_df(fns, ~readRDS(file.path(proj_dir, "data/bref", .x)))
 
-fns <- list.files(path = "data/bref", pattern = "^cle_batting_.*_raw.rds")
-cle_batting_agg_raw <- map_df(fns, ~readRDS(file.path("data", .x)))
+fns <- list.files(file.path(proj_dir, "data/bref"), pattern = "^cle_batting_.*_raw.rds")
+cle_batting_agg_raw <- map_df(fns, ~readRDS(file.path(proj_dir, "data/bref", .x)))
 
-fns <- list.files(path = "data/bref", pattern = "^cle_pitching_.*_raw.rds")
-cle_pitching_agg_raw <- map_df(fns, ~readRDS(file.path("data", .x)))
+fns <- list.files(file.path(proj_dir, "data/bref"), pattern = "^cle_pitching_.*_raw.rds")
+cle_pitching_agg_raw <- map_df(fns, ~readRDS(file.path(proj_dir, "data/bref", .x)))
 
 # Clean the data
 cle_games <- cle_games_agg_raw %>% 
@@ -164,8 +164,8 @@ cle_pitching <- cle_pitching_agg_raw %>%
 
 # Save final data frames.
 #
-saveRDS(cle_games, file.path("data", "cle_games.rds"))
+saveRDS(cle_games, file.path(proj_dir, "data", "bref_cle_games.rds"))
 
-saveRDS(cle_batting, file.path("data", "cle_batting.rds"))
+saveRDS(cle_batting, file.path(proj_dir, "data", "bref_cle_batting.rds"))
 
-saveRDS(cle_pitching, file.path("data", "cle_pitching.rds"))
+saveRDS(cle_pitching, file.path(proj_dir, "data", "bref_cle_pitching.rds"))

@@ -1,11 +1,12 @@
 # Define theme colors for plots.
 # https://colorkit.co/palettes/mlb/
 # https://teamcolorcodes.com/mlb-color-codes/
-pal_cle <- c("cle_blue" = "#0C2340", "cle_red" = "#E31937")
-pal_oak <- c("oak_gold" = "#efb21e", "oak_green" = "#003831")
-pal_sfg <- c("sfg_orange" = "#fd5a1e", "sfg_black" = "#27251f", "sfg_cream" = "#efd19f", "sfg_brown" = "#ae8f6f")
-pal_old <- c("old_dust" = "#CBBCB1", "old_dirt" = "#AF6B58", "old_grass" = "#556052", "old_plate" = "#F2EFEA")
-pal_mlb <- c(pal_cle, pal_oak, pal_sfg, pal_old)
+pal <- list()
+pal$cle <- c("cle_blue" = "#0C2340", "cle_red" = "#E31937")
+pal$oak <- c("oak_gold" = "#efb21e", "oak_green" = "#003831")
+pal$sfg <- c("sfg_orange" = "#fd5a1e", "sfg_black" = "#27251f", "sfg_cream" = "#efd19f", "sfg_brown" = "#ae8f6f")
+pal$old <- c("old_dust" = "#CBBCB1", "old_dirt" = "#AF6B58", "old_grass" = "#556052", "old_plate" = "#F2EFEA")
+pal$mlb <- c(pal$cle, pal$oak, pal$sfg, pal$old)
 # names(all_colors) <- NULL
 
 # Instead of typing this out for every ggplot.
@@ -44,3 +45,5 @@ pretty_ms <- function(minutes, verbose = FALSE) {
   }
   my_str
 }
+
+proj_dir <- "C:/Users/mpfol/OneDrive/Documents/GitHub/mlb-games"
