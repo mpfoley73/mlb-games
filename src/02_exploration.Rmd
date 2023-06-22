@@ -44,9 +44,17 @@ ball_png <- png::readPNG("../assets/baseball.png", native = TRUE)
 ball_grob <- grid::rasterGrob(ball_png, interpolate = FALSE)
 
 fig_no <- 0
+tbl_no <- 0
 
 # Refresh 2023 data?
 refresh_2023 <- FALSE
+
+flextable::set_flextable_defaults(
+  theme_fun = "theme_vanilla",
+  font.family = "Tahoma",
+  font.size = 10,
+  font.color = "#333333"
+)
 ```
 
 Measured pace of play slowed from a little over two hours per nine-innings in the 1940s to a brutal high of 3:16 in 2021. This project investigates reasons for the increase and the effect of recent efforts to quicken the pace of play. As I discovered in this exploration, there are several potential sources of pace of play data, but none are ideal. The most detailed data is difficult to compile and limited in breadth. Ultimately, I employed three sources.
@@ -57,11 +65,11 @@ Measured pace of play slowed from a little over two hours per nine-innings in th
 
 This section is an overview of these data sources and what they offer for analysis. In addition to insights that should guide further research, this script performs minor data engineering tasks to prep the data sets for model fitting. The output is four time-series tsibbles, `bref_cle_season_ts`, `mlb_season_ts`, `retro_season_g_ts`, and `retro_season_e_ts` saved in the project [data](https://github.com/mpfoley73/cleveland-mlb-games/tree/main/data) directory.
 
-# Raw Data from Step 01 {.tabset .tabset-fade .tabset-pills}
+# Raw Data from Step 01
 
 Prior to running this report, I ran
 
-- [01_get_bref_cle.R](https://github.com/mpfoley73/cleveland-mlb-games/blob/main/src/01_get_bref_cle.R) to scrape game summaries from Baseball-Reference.com. This source updates daily, so re-run to refresh YTD.
+- [01_get_bref_cle.R](https://github.com/mpfoley73/cleveland-mlb-games/blob/main/src/01_get_bref_cle.R) to scrape game summaries from Baseball-Reference.com. This source updates daily, so re-run to refresh YTD. 
 - [01_get_mlb.R](https://github.com/mpfoley73/cleveland-mlb-games/blob/main/src/01_get_mlb.R) to pull from the MLB API. Also updates daily.
 - [01-get-retro_game.R](https://github.com/mpfoley73/mlb-games/blob/main/src/01_get_retro_game.R) to load game summaries downloaded from Retrosheet. Updates once per season, so no need to re-run.
 - [01-get-retro-even.R](https://github.com/mpfoley73/mlb-games/blob/main/src/01_get_retro_event.R) to download and process with Chadwick game-event files from Retrosheet.  Updates once per season.
@@ -86,61 +94,79 @@ retro_games <- readRDS(file.path(proj_dir, "data/retro_game.rds"))
 retro_events <- readRDS(file.path(proj_dir, "data/retro_event.rds"))
 ```
 
-#### Baseball-Reference
+<br>
+All four data sources provide game duration. Baseball-reference was the most difficult to assemble, so I only collected Cleveland games. It does not have any data that isn't available in one or more of the other data sources. The MLB-API is nice because it covers the current season, and includes pitch counts. The Retrosheet Games data was simple to pull, but has limited coverage. The gold standard is the Retrosheet Events data. Difficult to assemble, but it has everything, including mid-inning pitcher substitutions. The only problem is coverage - it only goes back to 1914. I may ultimately use multiple sources in the final analysis.
+<br>
+
+```{r}
+tribble(
+  ~Source, ~Duration, ~Pitchers, ~Pitches, ~`Mid-Inning Subs`, ~Coverage,
+  "Baseball-Reference", "Y", "", "", "", "1900-present, Cleveland only.",
+  "MLB API", "Y", "Y", "Y", "", "1900-present.",
+  "Retrosheet Games", "Y", "Y", "", "", "1900-2022.",
+  "Retroshet Events", "Y", "Y", "Y", "Y", "1914-2022."
+) %>%
+  flextable::flextable() %>%
+  flextable::autofit()
+```
+
+<font color = "#666666" size = -1><b>Table `r (tbl_no <- tbl_no + 1)`</b>. Coverage for data sources used in this analysis.</font>
+
+## Baseball-Reference {.tabset .tabset-fade .tabset-pills}
 
 R script **01_get_bref_cle.R** scraped `r n_distinct(bref_cle_games$season)` seasons of Cleveland baseball game summaries, including the 2023 season through `r format(max(bref_cle_games$game_date), "%b %d")`, from [Baseball-Reference](https://www.baseball-reference.com/teams/CLE/2023.shtml). Baseball-Reference has one web page for each team and season. The pages include a table of game summaries. The R script loops through each season and scrapes the table. I ran it through all seasons through 2022, then set it to just refresh the 2023 season. _Not to self: run the script periodically to refresh this analysis by setting_ `refresh_2023 = TRUE`. Data set `bref_cle_games` is a `r comma(nrow(bref_cle_games))` x `r ncol(bref_cle_games)` data frame with one row per each of the `r comma(nrow(bref_cle_games))` games from 1901-1923. The Baseball-Reference pages also have player summaries. The R script scrapes these too. `bref_cle_batting` (`r comma(nrow(bref_cle_batting))` x `r ncol(bref_cle_batting)`) has season statistics for `r comma(length(unique(bref_cle_batting$Name)), 1)` Cleveland batters. `bref_cle_pitching` (`r comma(nrow(bref_cle_pitching))` x `r ncol(bref_cle_pitching)`) has stats for `r comma(length(unique(bref_cle_pitching$Name)), 1)` pitchers. Hitters appear in only `r count(bref_cle_batting, Name) %>% summarize(M = mean(n)) %>% pull(M) %>% comma(.1)` seasons on average, pitchers `r count(bref_cle_pitching, Name) %>% summarize(M = mean(n)) %>% pull(M) %>% comma(.1)` (yikes).
 
-#### MLB API
-
-The MLB API is publicly accessible. R package [baseballr](https://github.com/BillPetti/baseballr/) is an excellent tool for pulling this data. However, the MLB API seems to have no public documentation, and changes functionality. I had trouble getting **baseballr** to work, probably because the API is a moving target. I was able to copy/paste the important code into my own script, **01_get_mlb.R**, and get the data I needed. One particularly useful module in the API is **gamePace**, an incredible set of metrics related to game pace. You can get data at the individual game level, or summarized by team. I originally wanted to focus on just Cleveland, but the team summaries only show the team's _home_ games. So if you want season summaries for one team, you need game summaries for _all_ teams, then untangle the home and visting data. This was just too much effort, so I shifted my focus to MLB as a whole. As with **01_get_bref_cle.R**, I used my MLB R script download all seasons through 2022, then set it to just refresh 2023. _Run this script too when you refresh 2023_! Data set `mlb_pace` is a `r comma(nrow(mlb_pace))` x `r ncol(mlb_pace)` data frame with one row per each season, 1901-1923. Data sets `mlb_batting` (`r comma(nrow(mlb_batting))` x `r ncol(mlb_batting)`) and `mlb_pitching` (`r comma(nrow(mlb_pitching))` x `r ncol(mlb_pitching)`) have one row per team and season. I summarized the player summaries to augment the `mlb_pace` data with offense and defense statistics.
-
-#### Retrosheet
-
-[Retrosheet](https://www.retrosheet.org/) is a voluntary organization that has compiled game data into digital form and made it available for public use. Retrosheet has two main types of data. Game logs summarize the main outcomes of individual games, sort of like box scores. This data goes all the back to the 1800s. I downloaded this data through 2022 then processed it with **01_get_retro_game.R**. Event logs summarize individual plays. This data is incredibly detailed, but comes at the cost of having to process and store it in a database. Also, like the game logs, the data is published once per season, so you cannot get year to date data. **01_get_retro_event.R** downloaded and processed this data. Data set `retro_games` (`r nrow(retro_games) %>% comma(1)` x `r ncol(retro_games)`) summarizes games from `r min(year(retro_games$game_dt))` - `r max(year(retro_games$game_dt))`. `retro_events` (`r nrow(retro_events) %>% comma(1)` x `r ncol(retro_events)`) summarizes events into augmented game summaries that include more details that I am interested in correlating with pace of play. The data ranges from `r min(retro_events$year_id)` to `r max(retro_events$year_id)`.
-
-## bref_cle_games
+### bref_cle_games
 
 ```{r}
 skimr::skim(bref_cle_games)
 ```
 
-## bref_cle_batting
+### bref_cle_batting
 
 ```{r}
 skimr::skim(bref_cle_batting)
 ```
 
-## bref_cle_pitching
+### bref_cle_pitching
 
 ```{r}
 skimr::skim(bref_cle_pitching)
 ```
 
-## mlb_pace
+## MLB API {.tabset .tabset-fade .tabset-pills}
+
+The MLB API is publicly accessible. R package [baseballr](https://github.com/BillPetti/baseballr/) is an excellent tool for pulling this data. However, the MLB API seems to have no public documentation, and changes functionality. I had trouble getting **baseballr** to work, probably because the API is a moving target. I was able to copy/paste the important code into my own script, **01_get_mlb.R**, and get the data I needed. One particularly useful module in the API is **gamePace**, an incredible set of metrics related to game pace. You can get data at the individual game level, or summarized by team. I originally wanted to focus on just Cleveland, but the team summaries only show the team's _home_ games. So if you want season summaries for one team, you need game summaries for _all_ teams, then untangle the home and visting data. This was just too much effort, so I shifted my focus to MLB as a whole. As with **01_get_bref_cle.R**, I used my MLB R script download all seasons through 2022, then set it to just refresh 2023. _Run this script too when you refresh 2023_! Data set `mlb_pace` is a `r comma(nrow(mlb_pace))` x `r ncol(mlb_pace)` data frame with one row per each season, 1901-1923. Data sets `mlb_batting` (`r comma(nrow(mlb_batting))` x `r ncol(mlb_batting)`) and `mlb_pitching` (`r comma(nrow(mlb_pitching))` x `r ncol(mlb_pitching)`) have one row per team and season. I summarized the player summaries to augment the `mlb_pace` data with offense and defense statistics.
+
+### mlb_pace
 
 ```{r}
 skimr::skim(mlb_pace)
 ```
 
-## mlb_batting
+### mlb_batting
 
 ```{r}
 skimr::skim(mlb_batting)
 ```
 
-## mlb_pitching
+### mlb_pitching
 
 ```{r}
 skimr::skim(mlb_pitching)
 ```
 
-## retro_games
+## Retrosheet {.tabset .tabset-fade .tabset-pills}
+
+[Retrosheet](https://www.retrosheet.org/) is a voluntary organization that has compiled game data into digital form and made it available for public use. Retrosheet has two main types of data. Game logs summarize the main outcomes of individual games, sort of like box scores. This data goes all the back to the 1800s. I downloaded this data through 2022 then processed it with **01_get_retro_game.R**. Event logs summarize individual plays. This data is incredibly detailed, but comes at the cost of having to process and store it in a database. Also, like the game logs, the data is published once per season, so you cannot get year to date data. **01_get_retro_event.R** downloaded and processed this data. Data set `retro_games` (`r nrow(retro_games) %>% comma(1)` x `r ncol(retro_games)`) summarizes games from `r min(year(retro_games$game_dt))` - `r max(year(retro_games$game_dt))`. `retro_events` (`r nrow(retro_events) %>% comma(1)` x `r ncol(retro_events)`) summarizes events into augmented game summaries that include more details that I am interested in correlating with pace of play. The data ranges from `r min(retro_events$year_id)` to `r max(retro_events$year_id)`.
+
+### retro_games
 
 ```{r}
 skimr::skim(retro_games)
 ```
 
-## retro_events
+### retro_events
 
 ```{r}
 skimr::skim(retro_events)
@@ -148,11 +174,7 @@ skimr::skim(retro_events)
 
 # Create tsibbles {.tabset .tabset-fade .tabset-pills}
 
-Summarize the three Baseball-Reference data sets of Cleveland baseball into season summaries, then combine into a single data set, `bref_cle_seasons_ts`. Standardize most values to per-nine innings. "ts" stands for time series. The data frame is Cast as a **tsibble** for time series analysis.
-
-`mlb_pace` is already at the season granularity. The `mlb_batting` and `mlb_pitching` data sets are at the team-season granularity. Summarize them by season and cast to a **tsibble** as `mlb_season_ts_0`. The `_0` denotes that the data source is not yet finalized. There is some additional processing that I'll need to perform.
-
-Summarize the two Retrosheet data sets into season summaries, `_g` for the summary of game logs and `_e_` for the summary of event logs. They should be essentially identical, with the exception that the `_g` goes all the way back to 1900 (vs 1914 for `_e`), and `_e` has col `mi_p_subs` (mid-inning pitching substitutions).
+Baseball-Reference has game-level summaries for Cleveland games. MLB API has season-level summaries of MLB. Retrosheet game (g) and Retrosheet Event (e) have game-level summaries for every MLB game. The following chunks summarize the raw data sets into four time series tibbles (tsibbles). Each tsibble has one row per season. Most measures are standardized into per-game (`_G`), per-nine-innings (`_9I`), or per-plate-appearance (`_PA`).
 
 ## bref_cle_season_ts
 
@@ -199,12 +221,13 @@ bref_cle_season_ts <- bref_cle_games_ts %>%
   summarize(
     G = n(),
     I = sum(innings),
+    I_G = mean(innings),
     hrs_G = mean(hrs, na.rm = TRUE),
     hrs_9I = mean(hrs_9I, na.rm = TRUE),
     na_dur = sum(is.na(dur)),
     home_G = sum(home_ind == "Home"),
     home_att_G = mean(if_else(home_ind == "Home", attendance, NA_real_), na.rm = TRUE),
-    na_home_att = sum(home_ind == "Home" & is.na(attendance)),
+    na_home_att = sum(home_ind == "Home" & doubleheader_game == 0 & is.na(attendance)),
     W = sum(str_sub(outcome, 1, 1) == "W"),
     L = sum(str_sub(outcome, 1, 1) == "L"),
     avg_R_9I = mean(R / I),
@@ -233,7 +256,7 @@ bref_cle_season_ts <- bref_cle_games_ts %>%
     SO_PA = (bat_SO + pit_SO) / PA
   ) %>%
   select(
-    season, G, I, PA, hrs_9I, mins_PA, PA_9I, R_9I, R_PA, H_9I, H_PA, HR_9I, 
+    season, G, I_G, PA_9I, hrs_9I, mins_PA, R_9I, R_PA, H_9I, H_PA, HR_9I, 
     HR_PA, BB_9I, BB_PA, SO_9I, SO_PA, ERA = pit_ERA, WHIP = pit_WHIP,
     home_G, home_att_G, na_dur, na_home_att,
     W, L, W_pct, place
@@ -268,26 +291,28 @@ mlb_pitching_ts <- mlb_pitching %>%
 
 mlb_pace_ts <- tsibble(mlb_pace, index = season) %>%
   mutate(
+    PA_9I = PA / I * 9,
+    PA_pitcher = PA / pitchers,
+    pitchers_9I = pitchers / I * 9,
+    P_9I = P / I * 9,
+    P_PA = P / PA,
+    P_pitcher = P / pitchers,
     hrs_9I = as.numeric(dur, "hours") / I * 9,
-    mins_PA = as.numeric(dur, "minutes") / PA
+    mins_PA = as.numeric(dur, "minutes") / PA,
+    secs_P = as.numeric(dur, "seconds") / P,
+    I_G = I / G,
+    R_9I = R / I * 9,
+    R_PA = R / PA,
+    H_9I = H / I * 9,
+    H_PA = H / PA
   ) %>%
-  select(season, G, I, PA, hrs_9I, mins_PA, everything(), - c(extra_I_dur, extra_I_G))
+  select(season, G, I_G, PA_9I:H_PA, 
+         everything(), - c(extra_I_dur, extra_I_G))
 
 mlb_season_ts_0 <- mlb_pace_ts %>%
   inner_join(mlb_batting_ts, by = join_by(season)) %>%
   inner_join(mlb_pitching_ts, by = join_by(season)) %>%
   mutate(
-    PA_9I = PA / I * 9,
-    PA_pitcher = PA / pitchers,
-    pitchers_9I = pitchers / I * 9,
-    pitchers_PA = pitchers / PA,
-    P_9I = P / I * 9,
-    P_PA = P / PA,
-    P_pitcher = P / pitchers,
-    R_9I = R / I * 9,
-    R_PA = R / PA,
-    H_9I = H / I * 9,
-    H_PA = H / PA,
     HR_9I = batting_HR / I * 9,
     HR_PA = batting_HR / PA,
     BB_9I = batting_BB / I * 9,
@@ -299,15 +324,7 @@ mlb_season_ts_0 <- mlb_pace_ts %>%
     ERA = pitching_ER / I * 9 / 2, # two pitchers
     WHIP = (batting_BB + H) / I / 2 # two pitchers
   ) %>%
-  # select(-c(batting_G, pitching_G, batting_H, pitching_H,
-  #           batting_R, pitching_R, batting_PA, pitching_BF,
-  #           batting_1B, batting_3B,
-  #           pitching_HR, pitching_BB, batting_K, batting_HBP, pitching_AB,
-  #           pitching_W, pitching_L, pitching_IP, batting_P, pitching_P,
-  #           pitching_outs, pitching_GS)) %>%
-  # rename_with(~str_remove(.x, "batting_"), c(batting_HR:batting_BB, batting_AB:batting_OPS)) %>%
-  # rename_with(~str_remove(.x, "pitching_"), c(pitching_K, pitching_HBP:pitching_wild_pitches)) %>%
-  select(season:mins_PA, PA_9I:WHIP)
+  select(season:H_PA, HR_9I:last_col())
 
 glimpse(mlb_season_ts_0)
 ```
@@ -318,46 +335,40 @@ glimpse(mlb_season_ts_0)
 retro_season_g_ts <- retro_games %>%
   mutate(
     season = year(game_dt),
-    dur = duration(minutes = G_min),
-    I = outs / 6
+    I = outs / 6,  # outs are NA in ~500 rows
+    PA = vis_AB + home_AB + vis_BB + home_BB + vis_sac + home_sac,
+    pitchers = vis_pitchers + home_pitchers
   ) %>%
   summarise(
     .by = season,
     G = n(),
+    I_G = sum(I) / G,
+    PA_9I = mean(PA / I * 9, na.rm = TRUE),
+    PA_pitcher = mean(PA / pitchers, na.rm = TRUE),
+    pitchers_9I = mean(pitchers / I * 9, na.rm = TRUE),
     hrs_9I = mean(G_min / 60 / I * 9, na.rm = TRUE),
-    mins_PA = mean(G_min / (vis_AB + home_AB + vis_BB + home_BB + vis_sac + home_sac), na.rm = TRUE),
-    PA_9I = mean((vis_AB + home_AB + vis_BB + home_BB + vis_sac + home_sac) / I * 9, na.rm = TRUE),
+    mins_PA = mean(G_min / PA, na.rm = TRUE),
+    R_9I = mean((vis_R + home_R) / I * 9, na.rm = TRUE),
+    R_PA = mean((vis_R + home_R) / PA, na.rm = TRUE),
+    H_9I = mean((vis_H + home_H) / I * 9, na.rm = TRUE),
+    H_PA = mean((vis_H + home_H) / PA, na.rm = TRUE),
+    HR_9I = mean((vis_HR + home_HR) / I * 9, na.rm = TRUE),
+    HR_PA = mean((vis_HR + home_HR) / PA, na.rm = TRUE),
+    BB_9I = mean((vis_BB + home_BB) / I * 9, na.rm = TRUE),
+    BB_PA = mean((vis_BB + home_BB) / PA, na.rm = TRUE),
+    SO_9I = mean((vis_K + home_K) / I * 9, na.rm = TRUE),
+    SO_PA = mean((vis_K + home_K) / PA, na.rm = TRUE),
+    SB_9I = mean((vis_SB + home_SB) / I * 9, na.rm = TRUE),
+    CS_9I = mean((vis_CS + home_CS) / I * 9, na.rm = TRUE),
+    ERA = mean((vis_team_ER + home_team_ER) / I * 9, na.rm = TRUE),
+    WHIP = mean((vis_BB + home_BB + vis_H + home_H) / I, na.rm = TRUE),
+    att_G = mean(attendance, na.rm = TRUE),
     na_dur = sum(is.na(G_min)),
-    avg_att = mean(attendance, na.rm = TRUE),
-    G_non_na_att = sum(!is.na(attendance)),
-    pitchers = sum(vis_pitchers + home_pitchers),
-    I = sum(I),
-    R = sum(vis_R + home_R),
-    H = sum(vis_H + home_H),
-    E = sum(vis_errors + home_errors),
-    lob = sum(vis_LOB + home_LOB),
-    outs = sum(outs),
-    AB = sum(vis_AB + home_AB),
-    H2 = sum(vis_2B + home_2B),
-    H3 = sum(vis_3B + home_3B),
-    H4 = sum(vis_HR + home_HR),
-    RBI = sum(vis_RBI + home_RBI),
-    SH = sum(vis_sac + home_sac),
-    SF = sum(vis_sac_flies + home_sac_flies),
-    HBP = sum(vis_HBP + home_HBP),
-    BB = sum(vis_BB + home_BB),
-    IBB = sum(vis_IBB + home_IBB),
-    K = sum(vis_K + home_K),
-    SB = sum(vis_SB + home_SB),
-    CS = sum(vis_CS + home_CS),
-    PA = AB + BB + SH
+    na_att = sum(is.na(attendance))
   ) %>%
-  tsibble(index = season) %>%
-  select(season, G, I, PA, everything())
+  tsibble(index = season)
 
 glimpse(retro_season_g_ts)
-
-retro_games %>% filter(year(game_dt) == 1900)
 ```
 
 ## retro_season_e_ts
@@ -365,39 +376,44 @@ retro_games %>% filter(year(game_dt) == 1900)
 ```{r echo=TRUE}
 retro_season_e_ts <- retro_events %>%
   rename(season = year_id) %>%
+  mutate(
+    PA = away_ab_ct + home_ab_ct + away_bb_ct + home_bb_ct + away_sh_ct + home_sh_ct,
+    pitchers = away_pitcher_ct + home_pitcher_ct,
+    P = balls + strikes
+  ) %>%
   summarise(
     .by = season,
     G = n(),
+    I_G = sum(inn_ct) / G,
+    PA_9I = mean(PA / inn_ct * 9, na.rm = TRUE),
+    PA_pitcher = mean(PA / pitchers, na.rm = TRUE),
+    pitchers_9I = mean(pitchers / inn_ct * 9, na.rm = TRUE),
+    pitsubsmi_9I = mean(mid_inning_pitcher_sub_ct / inn_ct * 9, na.rm = TRUE),
+    P_9I = mean(P / inn_ct * 9, na.rm = TRUE),
+    P_PA = mean(P / PA, na.rm = TRUE),
+    P_pitcher = mean(P / pitchers, na.rm = TRUE),
     hrs_9I = mean(minutes_game_ct / 60 / inn_ct * 9, na.rm = TRUE),
-    na_dur = sum(!is.na(minutes_game_ct)),
-    avg_att = mean(attend_park_ct, na.rm = TRUE),
-    G_non_na_att = sum(!is.na(attend_park_ct)),
-    pitchers = sum(away_pitcher_ct + home_pitcher_ct),
-    mi_p_subs = sum(mid_inning_pitcher_sub_ct),
-    I = sum(inn_ct),
-    R = sum(away_score_ct + home_score_ct),
-    H = sum(away_hits_ct + home_hits_ct),
-    E = sum(away_err_ct + home_err_ct),
-    lob = sum(home_lob_ct + away_lob_ct),
-    outs = sum(outs_ct),
-    AB = sum(away_ab_ct + home_ab_ct),
-    H2 = sum(away_2b_ct + home_2b_ct),
-    H3 = sum(away_3b_ct + home_3b_ct),
-    H4 = sum(away_hr_ct + home_hr_ct),
-    RBI = sum(away_bi_ct + home_bi_ct),
-    SH = sum(away_sh_ct + home_sh_ct),
-    SF = sum(away_sf_ct + home_sf_ct),
-    SB = sum(away_sb_ct + home_sb_ct),
-    HBP = sum(away_hp_ct + home_hp_ct),
-    BB = sum(away_bb_ct + home_bb_ct),
-    IBB = sum(away_ibb_ct + home_ibb_ct),
-    K = sum(away_so_ct + home_so_ct),
-    SB = sum(away_sb_ct + home_sb_ct),
-    CS = sum(away_cs_ct + home_cs_ct),
-    PA = AB + BB + SH
+    mins_PA = mean(minutes_game_ct / PA, na.rm = TRUE),
+    secs_P = mean(minutes_game_ct * 60 / P, na.rm = TRUE),
+    R_9I = mean((away_score_ct + home_score_ct) / inn_ct * 9, na.rm = TRUE),
+    R_PA = mean((away_score_ct + home_score_ct) / PA, na.rm = TRUE),
+    H_9I = mean((away_hits_ct + home_hits_ct) / inn_ct * 9, na.rm = TRUE),
+    H_PA = mean((away_hits_ct + home_hits_ct) / PA, na.rm = TRUE),
+    HR_9I = mean((away_hr_ct + home_hr_ct) / inn_ct * 9, na.rm = TRUE),
+    HR_PA = mean((away_hr_ct + home_hr_ct) / PA, na.rm = TRUE),
+    BB_9I = mean((away_bb_ct + home_bb_ct) / inn_ct * 9, na.rm = TRUE),
+    BB_PA = mean((away_bb_ct + home_bb_ct) / PA, na.rm = TRUE),
+    SO_9I = mean((away_so_ct + home_so_ct) / inn_ct * 9, na.rm = TRUE),
+    SO_PA = mean((away_so_ct + home_so_ct) / PA, na.rm = TRUE),
+    SB_9I = mean((away_sb_ct + home_sb_ct) / inn_ct * 9, na.rm = TRUE),
+    CS_9I = mean((away_cs_ct + home_cs_ct) / inn_ct * 9, na.rm = TRUE),
+    ERA = mean((away_er_ct + home_er_ct) / inn_ct * 9, na.rm = TRUE),
+    WHIP = mean((away_bb_ct + home_bb_ct + away_hits_ct + home_hits_ct) / inn_ct, na.rm = TRUE),
+    att_G = mean(attend_park_ct, na.rm = TRUE),
+    na_dur = sum(is.na(minutes_game_ct)),
+    na_att = sum(is.na(attend_park_ct))
   ) %>%
-  tsibble(index = season) %>%
-  select(season, G, I, PA, everything())
+  tsibble(index = season)
 
 glimpse(retro_season_e_ts)
 ```
@@ -413,33 +429,6 @@ The pitch count per game (**MLB Pitches**) is potentially among the most importa
 The `total_time` and `extra_I_time` columns have issues (**MLB Duration**). Something is obviously wrong with several data points prior to 1930. Imputing values gives more reasonable values (**Imputed Durations**).
 
 The stolen bases data does not pass the eyeball test prior to 1950. Stolen bases seem reasonable with the exception of 1914-15. Caught stealing
-
-## a. Attendance
-
-```{r}
-bref_cle_games_ts %>%
-  filter(doubleheader_game == 0, home_ind == "Home") %>%
-  index_by(season = ~ year(.)) %>%
-  summarize(na_attendance = sum(if_else(is.na(attendance), 1, 0))) %>%
-  ggplot(aes(x = season, y = na_attendance)) + 
-  geom_col(width = 1.0, fill = "#E31937", alpha = 0.6) +
-  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
-  annotate(
-    geom = "curve", x = 2012, y = 35, xend = 2017, yend = 25, 
-    curvature = .10, arrow = arrow(length = unit(2, "mm")),
-    color = "#0C2340"
-  ) +
-  annotate(
-    geom = "text", x = 2007, y = 38, label = "COVID", size = 3.5, 
-    family = "Rockwell Condensed", hjust = "left", color = "#0C2340") +
-  coord_cartesian(ylim = c(0, 80)) +
-  labs(
-    title = "Cleveland attendance data is not reliable until 1937.",
-    subtitle = "Games with no recorded attendance.",
-    caption = "Source: www.baseball-reference.com.",
-    x = NULL, y = NULL
-  )
-```
 
 ## b. BREF Duration
 
@@ -567,7 +556,7 @@ mlb_season_ts_2 <- mlb_season_ts_1 %>%
 
 # Use MICE to impute values in the time cols
 imp_total_time <- mlb_season_ts_2 %>%
-  select(hrs_9I, mins_PA, PA_9I, pitchers_9I, pitchers_PA, season) %>%
+  select(hrs_9I, mins_PA, PA_9I, pitchers_9I, PA_pitcher, season) %>%
   mice::mice(print = FALSE, seed = 123) %>%
   complete()
 
@@ -639,58 +628,6 @@ mlb_season_ts <- mlb_season_ts_3 #%>%
 # Feature Exploration
 
 These subsections take a closer look at the features in the data set. The main purpose is characterize the relationships with the `hours_per_9` outcome variable, and possibly reduce the field of explanatory variables. Some variables, like `home_att_G`, are not useful toward understanding game duration, but are worth a look just because they are interesting.
-
-## Attendance
-
-Attendance data is spotty prior to 1940, so perhaps we should take the season averages with a grain of salt for those years. Also, attendance is constrained by the park capacity. Attendance might have been higher, at least in the 1990s when Cleveland sold out 455 straight games from 6/12/1995 through 4/2/2001. Here is a brief look at capacity:
-
-- [League Park](https://en.wikipedia.org/wiki/League_Park) was built in 1891 and seated 9,000. The Spiders played their until folding after the 1899 season. The Indians (originally the Blues) started in 1901. In 1910 the park was rebuilt with concrete and steel with 18,000 seats.
-- Municipal Stadium opened in 1932. The Indians played there from July 1932 through 1933, but returned to League Park in 1934 because attendance didn't justify such a large facility. Beginning in 1937, the Indians played weekend and holiday games at Municipal stadium and gradually added more dates. Beginning in 1947 all games were played there.
-- [Progressive Field](https://en.wikipedia.org/wiki/Progressive_Field) (named Jacobs Field from 1994-2007) opened in 1994 with a capacity of 42,865. Modifications increased capacity to 45,199 in 2009. Other modifications in 2011 reduced to 43,441, then 36,856 in 2015, and 34,830 in 2021.
-
-Attendance is generally correlated with winning, but something seems wrong with the two World Series years, 1948 and 1954. Average attendance in 1947, the first full season at Municipal Stadium, was 25,300. The Tribe finished 80-74 that year. The next season the Tribe went 97-58 and went on to win the World Series. Average attendance swelled to 40,300. Despite finishing 89-65 in 1949, attendance fell to 36,300, then to 26,700 in 1950. It continued to fall each season, reaching a low of 16,800 in 1953, despite 90+ wins each year. The 1954 season, with the gaudy 111-43 record only lifted attendance to 20,000 per game. It resumed its decline the next season. It briefly rebounded to 23,800 in 1959, but would not exceed 20,000 again until 1993.
-
-```{r}
-SF <- 50000
-(step_2_fig1 <- bref_cle_season_ts %>%
-  mutate(attend = if_else(season == 2020, 0, home_att_G)) %>%
-  ggplot(aes(x = season, y = attend)) +
-  geom_col(aes(y = 1 * SF), fill = "#0C2340", width = 1, alpha = 0.05) +
-  geom_col(aes(y = W / (W + L) * SF), fill = "#0C2340", width = 1, alpha = 0.2) +
-  geom_line(color = "#E31937", na.rm = TRUE, linewidth = 1) +
-  geom_point(aes(y = if_else(season %in% c(1920, 1948, 1954, 1995, 1997, 2016), attend, NA_real_)),
-             shape = 21, color = "#E31937", fill = "white", size = 3, na.rm = TRUE) +
-  geom_hline(yintercept = 0.50 * SF, linetype = 3, linewidth = 1, color = "#0C2340") +
-  annotate(
-    geom = "curve", x = 1960, y = 28000, xend = 1954, yend = 22000, 
-    curvature = .3, arrow = arrow(length = unit(2, "mm")),
-    color = "#0C2340"
-  ) +
-  annotate("text", x = 1961, y = 28000, label = "1954", size = 3, 
-           hjust = "left", color = "#0C2340") +
-  scale_y_continuous(limits = c(0, NA), 
-                     labels = scales::comma,
-                     expand = c(0,0),
-                     sec.axis = sec_axis(trans = ~ .x / SF,
-                                         labels = scales::percent_format(),
-                                         name = "Winning Percentage")) +
-  scale_x_continuous(breaks = seq(1900, 2030, 10), expand = c(0,0)) +
-  labs(
-    x = NULL, y = "Fans per Game",
-    title = "Attendance usually increases with performance.",
-    subtitle = "Cleveland average home attendance and winning percentage."
-  ) +
-  theme(
-    axis.text.y.left = element_text(color = "#E31937"),
-    axis.title.y.left = element_text(color = "#E31937", margin = margin(r = 5)),
-    axis.title.y.right = element_text(color = "#0C2340", margin = margin(l = 5))
-  )
-)
-```
-
-<font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`. Cleveland average home attendance and winning percentage</b>. Attendance is generally accompanies improved play. World Series appearances years are highlighted. 1948 and 1954 stand out. 1948 is incredibly high relative to other winning seasons, and 1954 is low considering the dominant performance. <br>Source: www.baseball-reference.com.</font>
-
-As an aside, check out 1917 and 1918. Game attendance does not seem unusual those two years despite WWI and the influenza pandemic. The US entered WWI in Apr '17 and the war ended after the season concluded in '18. The 1918 influenza pandemic started in the spring, but seems to have really taken off around October. Baseball survived the war as an acceptable diversion from civic duty, and in fact patriotic elements were integrated into the games.
 
 ## Game Duration {.tabset}
 
@@ -845,7 +782,7 @@ r2_K <- broom::glance(lm_K) %>% pull(adj.r.squared)
 # The plot has evidence of autocorrelation - there are other factors impacting
 # the trend. Including a t-1 term increases R^2 to .95. The standard error of 
 # the regression is .10 - about 6 minutes.
-lm_K_trend <- mlb_season_ts %>% model(TSLM(hrs_9I ~ log(K_per_9) + trend()))
+lm_K_trend <- mlb_season_ts %>% model(TSLM(hrs_9I ~ log(SO_9I) + trend()))
 lm_K_trend %>% report()
 ```
 
@@ -1183,3 +1120,121 @@ https://retrosheet.org/Research/SmithD/Relief%20Pitchers%20from%20Exile%20to%20S
 https://fivethirtyeight.com/features/relievers-have-broken-baseball-we-have-a-plan-to-fix-it/
 https://www.pitcherlist.com/retrosheet-play-by-play-data-at-your-fingertips/
 https://techgraphs.fangraphs.com/tag/retrosheet/
+
+# Appendix A: Attendance
+
+I'm curious about attendance at Cleveland baseball games. Attendance data is spotty prior to 1940 (Fig `r fig_no + 1`), so perhaps we should take the season averages with a grain of salt for those years.
+
+```{r}
+bref_cle_season_ts %>%
+  ggplot(aes(x = season, y = na_home_att)) + 
+  geom_col(width = 1.0, fill = pal$cle["R"], alpha = 0.6) +
+  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
+  annotate(
+    geom = "curve", x = 2012, y = 35, xend = 2017, yend = 25, 
+    curvature = .10, arrow = arrow(length = unit(2, "mm")),
+    color = pal$cle["B"]
+  ) +
+  annotate(
+    geom = "text", x = 2007, y = 38, label = "COVID", size = 2.5, 
+    family = "Tahoma", hjust = "left", color = "#0C2340") +
+  coord_cartesian(ylim = c(0, 80)) +
+  labs(
+    title = "Cleveland attendance data is not reliable until 1937.",
+    subtitle = "Games with no recorded attendance.",
+    x = NULL, y = NULL
+  )
+```
+
+<font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`</b>. Cleveland home games with no recorded attendance. Attendance at double-headers is only recorded for one game, so missing attendance related to double-headers is filtered out of this figure.<br>
+Source: www.baseball-reference.com.</font>
+
+Attendance is constrained by the park capacity. Attendance might have been higher, at least in the 1990s when Cleveland sold out 455 straight games from 6/12/1995 through 4/2/2001. Here is a brief look at capacity:
+
+- [League Park](https://en.wikipedia.org/wiki/League_Park) was built in 1891 and seated 9,000. The Spiders played their until folding after the 1899 season. The Indians (originally the Blues) started in 1901. In 1910 the park was rebuilt with concrete and steel with 18,000 seats.
+- Municipal Stadium opened in 1932. The Indians played there from July 1932 through 1933, but returned to League Park in 1934 because attendance didn't justify such a large facility. Beginning in 1937, the Indians played weekend and holiday games at Municipal stadium and gradually added more dates. Beginning in 1947 all games were played there.
+- [Progressive Field](https://en.wikipedia.org/wiki/Progressive_Field) (named Jacobs Field from 1994-2007) opened in 1994 with a capacity of 42,865. Modifications increased capacity to 45,199 in 2009. Other modifications in 2011 reduced capacity to 43,441, then 36,856 in 2015, and 34,830 in 2021.
+
+Attendance is generally correlated with winning, but something seems wrong with the two World Series years, 1948 and 1954. Average attendance in 1947, the first full season at Municipal Stadium, was 25,300. The Tribe finished 80-74 that year. The next season the Tribe went 97-58 and went on to win the World Series. Average attendance swelled to 40,300. Despite finishing 89-65 in 1949, attendance fell to 36,300, then to 26,700 in 1950. It continued to fall each season, reaching a low of 16,800 in 1953, despite 90+ wins each year. The 1954 season, with the gaudy 111-43 record only lifted attendance to 20,000 per game, attendance resumed its decline the following season. It briefly rebounded to 23,800 in 1959, but would not exceed 20,000 again until 1993.
+
+```{r}
+SF <- 50000
+(step_2_fig1 <- bref_cle_season_ts %>%
+  mutate(attend = if_else(season == 2020, 0, home_att_G)) %>%
+  ggplot(aes(x = season, y = attend)) +
+  geom_col(aes(y = 1 * SF), fill = pal$cle["B"], width = 1, alpha = 0.05) +
+  geom_col(aes(y = W / (W + L) * SF), fill = pal$cle["B"], width = 1, alpha = 0.2) +
+  geom_line(color = pal$cle["R"], na.rm = TRUE, linewidth = 1) +
+  geom_point(aes(y = if_else(season %in% c(1920, 1948, 1954, 1995, 1997, 2016), attend, NA_real_)),
+             shape = 21, color = pal$cle["R"], fill = "white", size = 3, na.rm = TRUE) +
+  geom_hline(yintercept = 0.50 * SF, linetype = 3, linewidth = 1, color = pal$cle["B"]) +
+  annotate(
+    geom = "curve", x = 1960, y = 28000, xend = 1954, yend = 22000, 
+    curvature = .3, arrow = arrow(length = unit(2, "mm")),
+    color = pal$cle["B"]
+  ) +
+  annotate("text", x = 1961, y = 28000, label = "1954", size = 3, 
+           hjust = "left", color = pal$cle["B"]) +
+  annotate(
+    geom = "curve", x = 2012, y = 3000, xend = 2017, yend = 2000, 
+    curvature = .10, arrow = arrow(length = unit(2, "mm")),
+    color = pal$cle["B"]
+  ) +
+  annotate(geom = "text", x = 2007, y = 5000, label = "COVID", size = 2.5, 
+           hjust = "left", color = pal$cle["B"]) +
+  scale_y_continuous(limits = c(0, NA), 
+                     labels = scales::comma,
+                     expand = c(0,0),
+                     sec.axis = sec_axis(trans = ~ .x / SF,
+                                         labels = scales::percent_format(),
+                                         name = "Winning Percentage")) +
+  scale_x_continuous(breaks = seq(1900, 2030, 10), expand = c(0,0)) +
+  labs(
+    x = NULL, y = "Fans per Game",
+    title = "Attendance usually increases with performance.",
+    subtitle = "Cleveland average home attendance and winning percentage."
+  ) +
+  theme(
+    axis.text.y.left = element_text(color = pal$cle["R"]),
+    axis.title.y.left = element_text(color = pal$cle["R"], margin = margin(r = 5)),
+    axis.title.y.right = element_text(color = pal$cle["B"], margin = margin(l = 5))
+  )
+)
+```
+
+<font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`</b>. Cleveland average home attendance and winning percentage</b>. Attendance is generally accompanies improved play. World Series appearances years are highlighted. 1948 and 1954 stand out. 1948 is incredibly high relative to other winning seasons, and 1954 is low considering the dominant performance. 2023 home attendance YTD averages `r bref_cle_season_ts %>% filter(season == 2023) %>% pull(home_att_G) %>% comma(1)`.<br>Source: www.baseball-reference.com.</font>
+
+As an aside, check out 1917 and 1918. Game attendance does not seem unusual those two years despite WWI and the influenza pandemic. The US entered WWI in Apr '17 and the war ended after the season concluded in '18. The 1918 influenza pandemic started in the spring, but seems to have really taken off around October. Baseball survived the war as an acceptable diversion from civic duty, and in fact patriotic elements were integrated into the games.
+
+For perspective, here is the Major League average with Cleveland attendance in the backdrop. MLB attendance trended upward until about 2007. The drop in 1995 followed the 1994-5 player strike. It seems possible all of MLB received a post-WWII attendance boost that corrected and returned to trend by the early 1950s.
+
+```{r}
+retro_season_g_ts %>% 
+  replace_na(list(att_G = 0)) %>%
+  ggplot(aes(x = season, y = att_G)) +
+  geom_line(data = bref_cle_season_ts %>% replace_na(list(home_att_G = 0)),
+            aes(y = home_att_G),
+            color = pal$cle["R"], linewidth = 2.5, alpha = .20) +
+  geom_line(color = pal$sfg["O"], linewidth = 1) +
+  geom_point(data = retro_season_g_ts %>% filter(season %in% c(1995, 2007)),
+             shape = 21, color = pal$sfg["O"], fill = "white", size = 3, na.rm = TRUE) +
+  geom_text(data = retro_season_g_ts %>% filter(season %in% c(1995, 2007)), 
+            aes(label = glue("{season}: {comma(round(att_G, -2), 1)}")),
+            color = pal$sfg["B"], size = 3, hjust = 0, nudge_x = 2, nudge_y = 1000) +
+  annotate(
+    geom = "curve", x = 2012, y = 3000, xend = 2017, yend = 2000, 
+    curvature = .10, arrow = arrow(length = unit(2, "mm")),
+    color = pal$cle["B"]
+  ) +
+  annotate(geom = "text", x = 2007, y = 5000, label = "COVID", size = 2.5, 
+           hjust = "left", color = pal$sfg["B"]) +
+  scale_y_continuous(limits = c(0, 45000), labels = scales::comma, expand = c(0,0)) +
+  scale_x_continuous(breaks = seq(1900, 2030, 10), expand = c(0,0)) +
+  labs(
+    x = NULL, y = "Fans per Game",
+    title = "MLB Attendance still recovering from COVID.",
+    subtitle = "Average attendance across MLB. Cleveland shown in backdrop."
+  )
+```
+
+<font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`</b>. Major League Baseball attendance peaked in 2007. 2022 attendance averaged `r retro_season_g_ts %>% filter(season == 2022) %>% pull(att_G) %>% comma(1)`.<br>Source: MLB API.</font>

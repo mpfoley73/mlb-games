@@ -2,9 +2,9 @@
 # https://colorkit.co/palettes/mlb/
 # https://teamcolorcodes.com/mlb-color-codes/
 pal <- list()
-pal$cle <- c("cle_blue" = "#0C2340", "cle_red" = "#E31937")
+pal$cle <- c("B" = "#0C2340", "R" = "#E31937")
 pal$oak <- c("oak_gold" = "#efb21e", "oak_green" = "#003831")
-pal$sfg <- c("sfg_orange" = "#fd5a1e", "sfg_black" = "#27251f", "sfg_cream" = "#efd19f", "sfg_brown" = "#ae8f6f")
+pal$sfg <- c("O" = "#fd5a1e", "B" = "#27251f", "C" = "#efd19f", "T" = "#ae8f6f")
 pal$old <- c("old_dust" = "#CBBCB1", "old_dirt" = "#AF6B58", "old_grass" = "#556052", "old_plate" = "#F2EFEA")
 pal$mlb <- c(pal$cle, pal$oak, pal$sfg, pal$old)
 # names(all_colors) <- NULL

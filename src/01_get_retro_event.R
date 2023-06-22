@@ -195,6 +195,13 @@ pitcher_chgs <- dbGetQuery(
   group by e.game_id"
 )
 
+pitches <- dbGetQuery(
+  retrosheet_conn,
+  "select game_id, sum(balls_ct) as balls, sum(strikes_ct) as strikes 
+   from game_event
+   group by game_id"
+)
+
 # pa <- dbGetQuery(
 #   retrosheet_conn,
 #   "select game_id, max(game_pa_ct) as pa_ct from game_event group by game_id"
@@ -202,6 +209,11 @@ pitcher_chgs <- dbGetQuery(
 
 game_logs <- game_logs_1 %>%
   left_join(pitcher_chgs, by = join_by(game_id)) %>%
+  left_join(pitches, by = join_by(game_id)) %>%
+  mutate(
+    balls = if_else(balls == 0, NA_real_, balls),
+    strikes = if_else(strikes == 0, NA_real_, strikes)
+  ) %>%
   replace_na(list(mid_inning_pitcher_subs = 0))
 
 # Save final data frame.
