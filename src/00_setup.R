@@ -3,16 +3,17 @@
 # https://teamcolorcodes.com/mlb-color-codes/
 pal <- list()
 pal$cle <- c("B" = "#0C2340", "R" = "#E31937")
-pal$oak <- c("oak_gold" = "#efb21e", "oak_green" = "#003831")
+pal$oak <- c("Y" = "#efb21e", "G" = "#003831")
 pal$sfg <- c("O" = "#fd5a1e", "B" = "#27251f", "C" = "#efd19f", "T" = "#ae8f6f")
-pal$old <- c("old_dust" = "#CBBCB1", "old_dirt" = "#AF6B58", "old_grass" = "#556052", "old_plate" = "#F2EFEA")
-pal$mlb <- c(pal$cle, pal$oak, pal$sfg, pal$old)
+pal$old <- c("dust" = "#CBBCB1", "dirt" = "#AF6B58", "grass" = "#556052", "plate" = "#F2EFEA")
+pal$mlb <- as.character(c(pal$cle, pal$oak["Y"], pal$sfg["O"], pal$old[2:3]))
 # names(all_colors) <- NULL
 
 # Instead of typing this out for every ggplot.
 theme_set(
   theme_light() +
     theme(
+      strip.background = element_rect(fill = pal$old["grass"]),
       text = element_text(family = "Rockwell Condensed", size = 16, color = "#003831"),
       plot.subtitle = element_text(family = "Rockwell", size = 12),
       plot.caption = element_text(size = 10, hjust = 0, color = "#666666"),

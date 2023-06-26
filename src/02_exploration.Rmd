@@ -57,7 +57,7 @@ flextable::set_flextable_defaults(
 )
 ```
 
-Measured pace of play slowed from a little over two hours per nine-innings in the 1940s to a brutal high of 3:16 in 2021. This project investigates reasons for the increase and the effect of recent efforts to quicken the pace of play. As I discovered in this exploration, there are several potential sources of pace of play data, but none are ideal. The most detailed data is difficult to compile and limited in breadth. Ultimately, I employed three sources.
+Average pace of play slowed from a little over two hours per nine-innings in the 1940s to a brutal 3:16 in 2021. This project investigates reasons for the increase and the effect of recent efforts to quicken the pace of play. None of the data sources for pace of play are ideal. The most detailed data is difficult to compile and is limited in breadth. Ultimately, I employed three sources.
 
 - Cleveland game and season summaries scraped from [Baseball-Reference](https://www.baseball-reference.com/teams/CLE/2023.shtml) web pages.
 - Team season summaries and MLB pace of play from MLB's publicly accessible (but apparently undocumented) API.
@@ -74,7 +74,7 @@ Prior to running this report, I ran
 - [01-get-retro_game.R](https://github.com/mpfoley73/mlb-games/blob/main/src/01_get_retro_game.R) to load game summaries downloaded from Retrosheet. Updates once per season, so no need to re-run.
 - [01-get-retro-even.R](https://github.com/mpfoley73/mlb-games/blob/main/src/01_get_retro_event.R) to download and process with Chadwick game-event files from Retrosheet.  Updates once per season.
 
-```{r echo=TRUE, class.source='fold-show'}
+```{r echo=TRUE, class.source='fold-show', warning=FALSE, message=FALSE}
 # 01_get_bref_cle.R. Re-run source to refresh 2023.
 if(refresh_2023) source("01_get_bref_cle.R")
 bref_cle_games <- readRDS(file.path(proj_dir, "data/bref_cle_games.rds"))
@@ -110,7 +110,7 @@ tribble(
   flextable::autofit()
 ```
 
-<font color = "#666666" size = -1><b>Table `r (tbl_no <- tbl_no + 1)`</b>. Coverage for data sources used in this analysis.</font>
+<font color = "#666666" size = -1><b>Table `r (tbl_no <- tbl_no + 1)`</b>. Coverage for data sources used in this analysis. Baseball-Reference and MLB API last collected on `r max(bref_cle_games$game_date) %>% format("%b-%d, %Y")`.</font>
 
 ## Baseball-Reference {.tabset .tabset-fade .tabset-pills}
 
@@ -336,7 +336,9 @@ retro_season_g_ts <- retro_games %>%
   mutate(
     season = year(game_dt),
     I = outs / 6,  # outs are NA in ~500 rows
-    PA = vis_AB + home_AB + vis_BB + home_BB + vis_sac + home_sac,
+    # PA = vis_AB + home_AB + vis_BB + home_BB + vis_sac + home_sac,
+    # PA := https://www.mlb.com/glossary/standard-stats/plate-appearance
+    PA = home_LOB + vis_LOB + outs + home_R + vis_R,
     pitchers = vis_pitchers + home_pitchers
   ) %>%
   summarise(
@@ -377,38 +379,41 @@ glimpse(retro_season_g_ts)
 retro_season_e_ts <- retro_events %>%
   rename(season = year_id) %>%
   mutate(
-    PA = away_ab_ct + home_ab_ct + away_bb_ct + home_bb_ct + away_sh_ct + home_sh_ct,
+    # PA = away_ab_ct + home_ab_ct + away_bb_ct + home_bb_ct + away_sh_ct + home_sh_ct,
+    # PA := https://www.mlb.com/glossary/standard-stats/plate-appearance
+    PA = home_lob_ct + away_lob_ct + outs_ct + home_score_ct + away_score_ct,
     pitchers = away_pitcher_ct + home_pitcher_ct,
-    P = balls + strikes
+    P = balls + strikes,
+    I = outs_ct / 6
   ) %>%
   summarise(
     .by = season,
     G = n(),
-    I_G = sum(inn_ct) / G,
-    PA_9I = mean(PA / inn_ct * 9, na.rm = TRUE),
+    I_G = sum(I) / G,
+    PA_9I = mean(PA / I * 9, na.rm = TRUE),
     PA_pitcher = mean(PA / pitchers, na.rm = TRUE),
-    pitchers_9I = mean(pitchers / inn_ct * 9, na.rm = TRUE),
-    pitsubsmi_9I = mean(mid_inning_pitcher_sub_ct / inn_ct * 9, na.rm = TRUE),
-    P_9I = mean(P / inn_ct * 9, na.rm = TRUE),
+    pitchers_9I = mean(pitchers / I * 9, na.rm = TRUE),
+    pitsubsmi_9I = mean(mid_inning_pitcher_sub_ct / I * 9, na.rm = TRUE),
+    P_9I = mean(P / I * 9, na.rm = TRUE),
     P_PA = mean(P / PA, na.rm = TRUE),
     P_pitcher = mean(P / pitchers, na.rm = TRUE),
-    hrs_9I = mean(minutes_game_ct / 60 / inn_ct * 9, na.rm = TRUE),
+    hrs_9I = mean(minutes_game_ct / 60 / I * 9, na.rm = TRUE),
     mins_PA = mean(minutes_game_ct / PA, na.rm = TRUE),
     secs_P = mean(minutes_game_ct * 60 / P, na.rm = TRUE),
-    R_9I = mean((away_score_ct + home_score_ct) / inn_ct * 9, na.rm = TRUE),
+    R_9I = mean((away_score_ct + home_score_ct) / I * 9, na.rm = TRUE),
     R_PA = mean((away_score_ct + home_score_ct) / PA, na.rm = TRUE),
-    H_9I = mean((away_hits_ct + home_hits_ct) / inn_ct * 9, na.rm = TRUE),
+    H_9I = mean((away_hits_ct + home_hits_ct) / I * 9, na.rm = TRUE),
     H_PA = mean((away_hits_ct + home_hits_ct) / PA, na.rm = TRUE),
-    HR_9I = mean((away_hr_ct + home_hr_ct) / inn_ct * 9, na.rm = TRUE),
+    HR_9I = mean((away_hr_ct + home_hr_ct) / I * 9, na.rm = TRUE),
     HR_PA = mean((away_hr_ct + home_hr_ct) / PA, na.rm = TRUE),
-    BB_9I = mean((away_bb_ct + home_bb_ct) / inn_ct * 9, na.rm = TRUE),
+    BB_9I = mean((away_bb_ct + home_bb_ct) / I * 9, na.rm = TRUE),
     BB_PA = mean((away_bb_ct + home_bb_ct) / PA, na.rm = TRUE),
-    SO_9I = mean((away_so_ct + home_so_ct) / inn_ct * 9, na.rm = TRUE),
+    SO_9I = mean((away_so_ct + home_so_ct) / I * 9, na.rm = TRUE),
     SO_PA = mean((away_so_ct + home_so_ct) / PA, na.rm = TRUE),
-    SB_9I = mean((away_sb_ct + home_sb_ct) / inn_ct * 9, na.rm = TRUE),
-    CS_9I = mean((away_cs_ct + home_cs_ct) / inn_ct * 9, na.rm = TRUE),
-    ERA = mean((away_er_ct + home_er_ct) / inn_ct * 9, na.rm = TRUE),
-    WHIP = mean((away_bb_ct + home_bb_ct + away_hits_ct + home_hits_ct) / inn_ct, na.rm = TRUE),
+    SB_9I = mean((away_sb_ct + home_sb_ct) / I * 9, na.rm = TRUE),
+    CS_9I = mean((away_cs_ct + home_cs_ct) / I * 9, na.rm = TRUE),
+    ERA = mean((away_er_ct + home_er_ct) / I * 9, na.rm = TRUE),
+    WHIP = mean((away_bb_ct + home_bb_ct + away_hits_ct + home_hits_ct) / I, na.rm = TRUE),
     att_G = mean(attend_park_ct, na.rm = TRUE),
     na_dur = sum(is.na(minutes_game_ct)),
     na_att = sum(is.na(attend_park_ct))
@@ -418,11 +423,9 @@ retro_season_e_ts <- retro_events %>%
 glimpse(retro_season_e_ts)
 ```
 
-# Coverage and Quality {.tabset .tabset-fade .tabset-pills}
+# Coverage and Quality
 
 Almost all features are fully populated, but there are several exceptions.
-
-Attendance for game two of a double-header is recorded as zero, but many games through 1936 have no recorded attendance. The plot in **CLE Attend.** excludes the double-header game two. Cleveland game duration is spotty before 1940 (**CLE Duration**).
 
 The pitch count per game (**MLB Pitches**) is potentially among the most important variables, but unfortunately the data is not populate until 1950. And even then, something is very wrong about the values before 1988. Furthermore, the 1988-1998 values are suspiciously noisy. I will null out the pre-1999 values for `total_P`.
 
@@ -430,58 +433,194 @@ The `total_time` and `extra_I_time` columns have issues (**MLB Duration**). Some
 
 The stolen bases data does not pass the eyeball test prior to 1950. Stolen bases seem reasonable with the exception of 1914-15. Caught stealing
 
-## b. BREF Duration
+## Duration {.tabset .tabset-fade .tabset-pills}
+
+The MLB API appears to have the most complete record of game duration, but keep in mind that this data is pre-summarized at the season level, so 100% coverage since 1900 just means the API returned a sum of minutes for each season. The _Trend_ chart shows that when you divide by innings, something is quite off during several seasons. Eight seasons are dubious, in fact. I'm not quite inclined to throw out the bathwater lest a perfectly good baby is floating in there, so instead I imputed values using MICE. A more sensible procedure would be to use values from the other sources, but I wanted MICE practice.
+
+The Baseball-Reference data is somewhat compromised in the definition of innings. A nine-inning might be 27+27=54 outs, or only 51 if the home team won. So the Cleveland duration per 9-innings is biased somewhat low - ~50% of games are 3/54 shorter, so avg duration is probably 4-5 minutes longer.
+
+### Missingness
 
 ```{r}
-bref_cle_games_ts %>%
-  index_by(season = ~ year(.)) %>%
-  group_by(season) %>%
-  summarize(na_duration = sum(if_else(is.na(dur), 1, 0))) %>%
-  ggplot(aes(x = season, y = na_duration)) + 
-  geom_col(width = 1.0, fill = "#E31937", alpha = 0.6) +
-  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
-  labs(
-    title = "Cleveland game duration data is not reliable until 1920.",
-    subtitle = "Games with no recorded duration.",
-    caption = "Source: www.baseball-reference.com.",
-    x = NULL, y = NULL
-  )
-```
-
-## c. Retro-Game Duration
-
-```{r}
-retro_season_g_ts %>%
-  mutate(na_duration = na_dur / G) %>%
-  ggplot(aes(x = season, y = na_duration)) + 
-  geom_col(width = 1.0, fill = "#E31937", alpha = 0.6) +
-  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
-  scale_y_continuous(labels = percent_format(1)) +
-  labs(
-    title = "Retrosheet duration data is not reliable until 1920.",
-    subtitle = "Retrosheet game-data games with no recorded duration.",
-    caption = "Source: www.retrosheet.org game logs.",
-    x = NULL, y = NULL
-  )
-```
-
-## d. Retro-Event Duration
-
-```{r}
-retro_season_e_ts %>%
-  mutate(na_duration = na_dur / G) %>%
-  ggplot(aes(x = season, y = na_duration)) + 
-  geom_col(width = 1.0, fill = "#E31937", alpha = 0.6) +
+bind_rows(
+  `Baseball-Reference` = bref_cle_season_ts %>% select(season, G, na_dur) %>% as_tibble(),
+  `MLB API` = mlb_season_ts_0 %>% select(season, G) %>% as_tibble(),
+  `Retrosheet (g)` = retro_season_g_ts %>% select(season, G, na_dur),
+  `Retrosheet (e)` = retro_season_e_ts %>% select(season, G, na_dur),
+  .id = "Source"
+) %>%
+  replace_na(list(na_dur = 0)) %>%
+  mutate(
+    missing = na_dur / G,
+    recorded = 1 - missing
+  ) %>%
+  pivot_longer(c(missing, recorded)) %>%
+  ggplot(aes(x = season, y = value, fill = name)) +
+  geom_area(alpha = .40) +
   scale_x_continuous(breaks = seq(1900, 2030, 10)) +
   scale_y_continuous(labels = percent_format(1)) +
-  coord_cartesian(xlim = c(1900, NA)) +
+  scale_fill_manual(values = as.character(c(pal$old["dust"], pal$old["dirt"]))) +
+  facet_wrap(facets = vars(Source)) +
   labs(
-    title = "Retrosheet duration data is not reliable until 1920.",
-    subtitle = "Retrosheet event-data games with no recorded duration.",
-    caption = "Source: www.retrosheet.org game event logs.",
-    x = NULL, y = NULL
-  )
+    title = "Game duration was not recorded regularly until after 1920.",
+    subtitle = "Percent of games with no recorded duration.",
+    x = NULL, y = NULL, fill = NULL
+  ) +
+  guides(fill = guide_legend(reverse = TRUE)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = .5))
 ```
+
+### Trend
+
+```{r warning=FALSE}
+bind_rows(
+  `Baseball-Reference (Cleve)` = bref_cle_season_ts %>% select(season, hrs_9I) %>% as_tibble(),
+  `MLB API` = mlb_season_ts_0 %>% select(season, hrs_9I) %>% as_tibble(),
+  `Retrosheet (g)` = retro_season_g_ts %>% select(season, hrs_9I),
+  `Retrosheet (e)` = retro_season_e_ts %>% select(season, hrs_9I),
+  .id = "Source"
+) %>%
+  ggplot(aes(x = season, y = hrs_9I, color = Source, linewidth = Source, alpha = Source)) +
+  geom_line() +
+  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
+  scale_y_continuous(labels = pretty_hm) +
+  scale_color_manual(values = pal$mlb) +
+  scale_linewidth_manual(values = c(4, 1, 1, 1)) +
+  scale_alpha_manual(values = c(.2, 1, 1, 1)) +
+  labs(
+    title = "MLB API has several dubious durations.",
+    subtitle = "Four sources of avg duration per 9 innings of play.",
+    caption = "Note: Baseball-Reference is Cleveland games only.",
+    x = NULL, y = NULL, color = NULL, linewidth = NULL, alpha = NULL
+  ) +
+  guides(fill = guide_legend(reverse = TRUE)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = .5))
+```
+
+### MLB API's Dubious Durations
+
+```{r}
+dubious_seasons <- mlb_season_ts_0 %>% filter(hrs_9I < 1.5) %>% pull(season)
+
+mlb_season_ts_0 %>%
+  mutate(
+    # dur_per_9 = time_length(dur / I * 9, "hours"),
+    status = if_else(season %in% dubious_seasons, "Suspicious", "Probably good"),
+    status = factor(status, levels = c("Suspicious", "Probably good"))
+  ) %>%
+  ggplot(aes(x = season, y = hrs_9I, color = status)) + 
+  geom_point() +
+  scale_color_manual(values = as.character(c(pal$oak["Y"], pal$cle["R"]))) +
+  scale_y_continuous(labels = pretty_hm, limits = c(0, 3.5)) +
+  labs(
+    title = "Several game duration points are suspicious.",
+    subtitle = "Hours per nine innings.",
+    caption = "Source: MLB Stats API.",
+    x = NULL, y = NULL, color = NULL
+  ) +
+  theme(legend.position = "top")
+```
+
+### MLB with Imputations
+
+```{r warning=FALSE, echo=TRUE}
+# Remove everything related to pitch counts prior to 1999.
+x <- mlb_season_ts_0 %>%
+  mutate(across(P_9I:P_pitcher, ~if_else(season < 1999, NA_real_, .)))
+
+# Remove bad values from time columns
+y <- x %>%
+  mutate(across(hrs_9I:mins_PA, ~if_else(season %in% dubious_seasons, NA, .)))
+
+# Use MICE to impute values in the time cols
+z <- y %>%
+  select(hrs_9I, mins_PA, PA_9I, pitchers_9I, PA_pitcher, season) %>%
+  mice::mice(print = FALSE, seed = 123) %>%
+  complete()
+
+mlb_season_ts_1 <- y
+mlb_season_ts_1$hrs_9I <- z$hrs_9I
+mlb_season_ts_1$mins_PA <- z$mins_PA
+```
+
+```{r}
+mlb_season_ts_1 %>%
+  mutate(
+    status = if_else(season %in% dubious_seasons, "Imputed", "Probably good"),
+    status = factor(status, levels = c("Imputed", "Probably good"))
+  ) %>%
+  ggplot(aes(x = season, y = hrs_9I, color = status)) + 
+  geom_point() +
+  scale_color_manual(values = as.character(c(pal$oak["Y"], pal$cle["R"]))) +
+  scale_y_continuous(labels = pretty_hm, limits = c(0, 3.5)) +
+  labs(
+    title = "Outlier game durations with imputed values", 
+    x = NULL, y = NULL, color = NULL,
+    caption = "Source: MLB Stats API.",
+    subtitle = "Minutes per plate appearance"
+  ) +
+  theme(legend.position = "top")
+```
+
+### New Trend
+
+```{r warning=FALSE}
+bind_rows(
+  `Baseball-Reference (Cleve)` = bref_cle_season_ts %>% select(season, hrs_9I) %>% as_tibble(),
+  `MLB API` = mlb_season_ts_1 %>% select(season, hrs_9I) %>% as_tibble(),
+  `Retrosheet (g)` = retro_season_g_ts %>% select(season, hrs_9I),
+  `Retrosheet (e)` = retro_season_e_ts %>% select(season, hrs_9I),
+  .id = "Source"
+) %>%
+  ggplot(aes(x = season, y = hrs_9I, color = Source, linewidth = Source, alpha = Source)) +
+  geom_line() +
+  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
+  scale_y_continuous(labels = pretty_hm) +
+  scale_color_manual(values = pal$mlb) +
+  scale_linewidth_manual(values = c(4, 1, 1, 1)) +
+  scale_alpha_manual(values = c(.2, 1, 1, 1)) +
+  labs(
+    title = "Sources are in near perfect alignment.",
+    subtitle = "Avg duration per 9 innings of play, MLB API imputed.",
+    caption = "Note: Baseball-Reference is Cleveland games only.",
+    x = NULL, y = NULL, color = NULL, linewidth = NULL, alpha = NULL
+  ) +
+  guides(fill = guide_legend(reverse = TRUE)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = .5))
+```
+
+## Plate Appearances {.tabset .tabset-fade .tabset-pills}
+
+The Baseball-Reference data under-counts plate appearances  (PAs) for Cleveland games because my definition of PAs (AB + sacs + BBs) is not quite the same as the [MLB definition](https://www.mlb.com/glossary/standard-stats/plate-appearance) of runs + outs + LOB since I didn't have the LOB. The MLB APA differs from Retrosheet slightly, a litte more prior to 1920, and a lot prior to 1910. Retrosheet looks like the more reliable source here. This time I will impute dubious MLB API values with the realistic ones from Retrosheet (g).
+
+### Trend
+
+```{r}
+bind_rows(
+  `Baseball-Reference (Cleve)` = bref_cle_season_ts %>% select(season, PA_9I) %>% as_tibble(),
+  `MLB API` = mlb_season_ts_1 %>% select(season, PA_9I) %>% as_tibble(),
+  `Retrosheet (g)` = retro_season_g_ts %>% select(season, PA_9I) %>% as_tibble(),
+  `Retrosheet (e)` = retro_season_e_ts %>% select(season, PA_9I) %>% as_tibble(),
+  .id = "Source"
+) %>%
+  # pivot_wider(values_from = PA_9I, names_from = Source)
+  ggplot(aes(x = season, y = PA_9I, color = Source, linewidth = Source, alpha = Source)) +
+  geom_line() +
+  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
+  scale_y_continuous() +
+  scale_color_manual(values = pal$mlb) +
+  scale_linewidth_manual(values = c(4, 1, 1, 1)) +
+  scale_alpha_manual(values = c(.2, 1, 1, 1)) +
+  labs(
+    title = "Sources are in near perfect alignment.",
+    subtitle = "Avg plate appearances per 9 innings of play, MLB API imputed.",
+    caption = "Note: Baseball-Reference is Cleveland games only.",
+    x = NULL, y = NULL, color = NULL, linewidth = NULL, alpha = NULL
+  ) +
+  guides(fill = guide_legend(reverse = TRUE)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = .5))
+```
+
 
 ## f. MLB Pitches
 
@@ -509,7 +648,7 @@ mlb_season_ts_0 %>%
 # {-}
 
 <font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`. <br>
-<b>a</b>. Cleveland home games with no recorded attendance</b>. Data is not reliably recorded until 1937. Note that the 2020 season was partial and played with no in-person spectators due to the Covid pandemic.<br>
+season was partial and played with no in-person spectators due to the Covid pandemic.<br>
 <b>b</b>. Cleveland games with no recorded duration in Baseball-Reference</b>. Data is not reliably recorded until 1920.<br>
 </font>
 <b>c</b>. MLB games with no recorded duration in Retrosheet game logs. Coverage is about the same as Baseball-Reference.<.br>
@@ -520,72 +659,6 @@ mlb_season_ts_0 %>%
 
 I used MICE (more on technique, [here](https://mpfoley73.netlify.app/post/2022-07-26-imputing-values-with-mice/)) to impute values for the suspicious MLB API data durations.
 
-## a. MLB Duration
-
-```{r}
-suspicious_seasons <- c(1902, 1903, 1904, 1907, 1918, 1919, 1928, 1929)
-mlb_season_ts_0 %>%
-  mutate(
-    # dur_per_9 = time_length(dur / I * 9, "hours"),
-    status = if_else(season %in% suspicious_seasons, "Suspicious", "Probably good"),
-    status = factor(status, levels = c("Suspicious", "Probably good"))
-  ) %>%
-  ggplot(aes(x = season, y = hrs_9I, color = status)) + 
-  geom_point() +
-  scale_color_manual(values = c("#efb21e", "#003831")) +
-  scale_y_continuous(labels = pretty_hm, limits = c(0, 3.5)) +
-  labs(
-    title = "Several game duration points are suspicious.",
-    subtitle = "Hours per nine innings.",
-    caption = "Source: MLB Stats API.",
-    x = NULL, y = NULL, color = NULL
-  ) +
-  theme(legend.position = "top")
-```
-
-## Imputation
-
-```{r warning=FALSE, echo=TRUE}
-# Remove everything related to pitch counts prior to 1999.
-mlb_season_ts_1 <- mlb_season_ts_0 %>%
-  mutate(across(P_9I:P_pitcher, ~if_else(season < 1999, NA_real_, .)))
-
-# Remove bad values from time columns
-mlb_season_ts_2 <- mlb_season_ts_1 %>%
-  mutate(across(hrs_9I:mins_PA, ~if_else(season %in% suspicious_seasons, NA, .)))
-
-# Use MICE to impute values in the time cols
-imp_total_time <- mlb_season_ts_2 %>%
-  select(hrs_9I, mins_PA, PA_9I, pitchers_9I, PA_pitcher, season) %>%
-  mice::mice(print = FALSE, seed = 123) %>%
-  complete()
-
-mlb_season_ts_3 <- mlb_season_ts_2
-mlb_season_ts_3$hrs_9I <- imp_total_time$hrs_9I
-mlb_season_ts_3$mins_PA <- imp_total_time$mins_PA
-```
-
-## b. MLB Imputed
-
-```{r}
-mlb_season_ts_3 %>%
-  mutate(
-    # dur_per_9 = time_length(dur / I * 9, "hours"),
-    status = if_else(season %in% suspicious_seasons, "Imputed", "Probably good"),
-    status = factor(status, levels = c("Imputed", "Probably good"))
-  ) %>%
-  ggplot(aes(x = season, y = hrs_9I, color = status)) + 
-  geom_point() +
-  scale_color_manual(values = c("#efb21e", "#003831")) +
-  scale_y_continuous(labels = pretty_hm, limits = c(0, 3.5)) +
-  labs(
-    title = "Outlier game durations with imputed values", 
-    x = NULL, y = NULL, color = NULL,
-    caption = "Source: MLB Stats API.",
-    subtitle = "Minutes per plate appearance"
-  ) +
-  theme(legend.position = "top")
-```
 
 # {-}
 
@@ -596,7 +669,7 @@ mlb_season_ts_3 %>%
 ## Stolen Bases
 
 ```{r warning=FALSE}
-mlb_season_ts_3 %>% 
+mlb_season_ts_1 %>% 
   pivot_longer(cols = c(SB_9I, CS_9I)) %>%
   ggplot(aes(x = season, y = value, color = name)) +
   geom_point() +
@@ -615,7 +688,7 @@ mlb_season_ts_3 %>%
 As with the Baseball Reference data, I will standardize the MLB data into per-nine-innings and other related levels.
 
 ```{r echo=TRUE, class.source='fold-show'}
-mlb_season_ts <- mlb_season_ts_3 #%>%
+mlb_season_ts <- mlb_season_ts_1 #%>%
   # mutate(
   #   dur_per_PA = dur / PA,
   #   dur_per_P = dur / P,
@@ -1209,32 +1282,41 @@ As an aside, check out 1917 and 1918. Game attendance does not seem unusual thos
 For perspective, here is the Major League average with Cleveland attendance in the backdrop. MLB attendance trended upward until about 2007. The drop in 1995 followed the 1994-5 player strike. It seems possible all of MLB received a post-WWII attendance boost that corrected and returned to trend by the early 1950s.
 
 ```{r}
-retro_season_g_ts %>% 
-  replace_na(list(att_G = 0)) %>%
+x <- bind_rows(
+  MLB = retro_season_g_ts %>% replace_na(list(att_G = 0)) %>% as_tibble(),
+  Cleveland = bref_cle_season_ts %>% replace_na(list(home_att_G = 0)) %>% 
+    rename(att_G = home_att_G) %>% as_tibble(),
+  .id = "grp"
+)
+
+x %>% 
   ggplot(aes(x = season, y = att_G)) +
-  geom_line(data = bref_cle_season_ts %>% replace_na(list(home_att_G = 0)),
-            aes(y = home_att_G),
-            color = pal$cle["R"], linewidth = 2.5, alpha = .20) +
-  geom_line(color = pal$sfg["O"], linewidth = 1) +
-  geom_point(data = retro_season_g_ts %>% filter(season %in% c(1995, 2007)),
-             shape = 21, color = pal$sfg["O"], fill = "white", size = 3, na.rm = TRUE) +
-  geom_text(data = retro_season_g_ts %>% filter(season %in% c(1995, 2007)), 
+  geom_line(aes(color = grp, linewidth = grp, alpha = grp)) +
+  geom_point(data = x %>% filter((grp == "MLB" & season %in% c(1995, 2007)) |
+                                   (grp == "Cleveland" & season %in% c(1999))),
+             aes(color = grp),
+             shape = 21, fill = "white", size = 3, na.rm = TRUE) +
+  geom_text(data = x %>% filter((grp == "MLB" & season %in% c(1995, 2007)) |
+                                   (grp == "Cleveland" & season %in% c(1999))),
             aes(label = glue("{season}: {comma(round(att_G, -2), 1)}")),
             color = pal$sfg["B"], size = 3, hjust = 0, nudge_x = 2, nudge_y = 1000) +
   annotate(
-    geom = "curve", x = 2012, y = 3000, xend = 2017, yend = 2000, 
+    geom = "curve", x = 2012, y = 3000, xend = 2017, yend = 2000,
     curvature = .10, arrow = arrow(length = unit(2, "mm")),
-    color = pal$cle["B"]
+    color = pal$sfg["B"]
   ) +
-  annotate(geom = "text", x = 2007, y = 5000, label = "COVID", size = 2.5, 
+  annotate(geom = "text", x = 2007, y = 5000, label = "COVID", size = 2.5,
            hjust = "left", color = pal$sfg["B"]) +
   scale_y_continuous(limits = c(0, 45000), labels = scales::comma, expand = c(0,0)) +
   scale_x_continuous(breaks = seq(1900, 2030, 10), expand = c(0,0)) +
+  scale_color_manual(values = as.character(c(pal$sfg["O"], pal$cle["R"]))) +
+  scale_linewidth_manual(values = c(1, 2.5)) +
+  scale_alpha_manual(values = c(1, .20)) +
   labs(
-    x = NULL, y = "Fans per Game",
-    title = "MLB Attendance still recovering from COVID.",
-    subtitle = "Average attendance across MLB. Cleveland shown in backdrop."
+    x = NULL, y = "Fans per Game", color = NULL, alpha = NULL, linewidth = NULL,
+    title = "Cleveland attendance compared to rest of MLB.",
+    subtitle = "Average Cleveland attendance. MLB shown in backdrop."
   )
 ```
 
-<font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`</b>. Major League Baseball attendance peaked in 2007. 2022 attendance averaged `r retro_season_g_ts %>% filter(season == 2022) %>% pull(att_G) %>% comma(1)`.<br>Source: MLB API.</font>
+<font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`</b>. Cleveland attendance peaked in 1999 and was `r bref_cle_season_ts %>% filter(season == 2022) %>% pull(home_att_G) %>% comma(1)` in 2022. 2023 through `r max(bref_cle_games$game_date) %>% format("%b %d")` is `r bref_cle_season_ts %>% filter(season == 2023) %>% pull(home_att_G) %>% comma(1)`. Major League Baseball attendance peaked in 2007. 2022 attendance averaged `r retro_season_g_ts %>% filter(season == 2022) %>% pull(att_G) %>% comma(1)`.<br>Source: MLB API, Retrosheet.</font>
