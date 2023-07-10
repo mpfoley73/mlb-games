@@ -110,7 +110,7 @@ tribble(
   flextable::autofit()
 ```
 
-<font color = "#666666" size = -1><b>Table `r (tbl_no <- tbl_no + 1)`</b>. Coverage for data sources used in this analysis. Baseball-Reference and MLB API last collected on `r max(bref_cle_games$game_date) %>% format("%b-%d, %Y")`.</font>
+<font color = "#666666" size = -1><b>Table `r (tbl_no <- tbl_no + 1)`</b>. Coverage for data sources used in this analysis. Baseball-Reference and MLB API last collected on `r max(bref_cle_games$game_date) %>% format("%b %d, %Y")`.</font>
 
 ## Baseball-Reference {.tabset .tabset-fade .tabset-pills}
 
@@ -376,14 +376,13 @@ glimpse(retro_season_g_ts)
 ## retro_season_e_ts
 
 ```{r echo=TRUE}
-retro_season_e_ts <- retro_events %>%
+retro_season_e_ts_0 <- retro_events %>%
   rename(season = year_id) %>%
   mutate(
-    # PA = away_ab_ct + home_ab_ct + away_bb_ct + home_bb_ct + away_sh_ct + home_sh_ct,
     # PA := https://www.mlb.com/glossary/standard-stats/plate-appearance
     PA = home_lob_ct + away_lob_ct + outs_ct + home_score_ct + away_score_ct,
     pitchers = away_pitcher_ct + home_pitcher_ct,
-    P = balls + strikes,
+    P = pitches, # balls + strikes,
     I = outs_ct / 6
   ) %>%
   summarise(
@@ -393,6 +392,7 @@ retro_season_e_ts <- retro_events %>%
     PA_9I = mean(PA / I * 9, na.rm = TRUE),
     PA_pitcher = mean(PA / pitchers, na.rm = TRUE),
     pitchers_9I = mean(pitchers / I * 9, na.rm = TRUE),
+    pitsubsbi_9I = mean((pitchers - mid_inning_pitcher_sub_ct - 2) / I * 9, na.rm = TRUE),
     pitsubsmi_9I = mean(mid_inning_pitcher_sub_ct / I * 9, na.rm = TRUE),
     P_9I = mean(P / I * 9, na.rm = TRUE),
     P_PA = mean(P / PA, na.rm = TRUE),
@@ -420,22 +420,22 @@ retro_season_e_ts <- retro_events %>%
   ) %>%
   tsibble(index = season)
 
-glimpse(retro_season_e_ts)
+glimpse(retro_season_e_ts_0)
 ```
 
 # Coverage and Quality
 
 Almost all features are fully populated, but there are several exceptions.
 
+The MLB-API duration data has issues before 1930 and its plate appearances are odd before 1920. Imputation gives more reasonable values. There is no reliable source of pitch counts prior to 1999, so I've delete them.
+
 The pitch count per game (**MLB Pitches**) is potentially among the most important variables, but unfortunately the data is not populate until 1950. And even then, something is very wrong about the values before 1988. Furthermore, the 1988-1998 values are suspiciously noisy. I will null out the pre-1999 values for `total_P`.
 
-The `total_time` and `extra_I_time` columns have issues (**MLB Duration**). Something is obviously wrong with several data points prior to 1930. Imputing values gives more reasonable values (**Imputed Durations**).
-
-The stolen bases data does not pass the eyeball test prior to 1950. Stolen bases seem reasonable with the exception of 1914-15. Caught stealing
+The stolen bases data does not pass the eyeball test prior to 1950. Stolen bases seem reasonable with the exception of 1914-15. I will leave this alone because I am not sure what to delete or replace. I'll just use stolen bases prior to 1950 with caution.
 
 ## Duration {.tabset .tabset-fade .tabset-pills}
 
-The MLB API appears to have the most complete record of game duration, but keep in mind that this data is pre-summarized at the season level, so 100% coverage since 1900 just means the API returned a sum of minutes for each season. The _Trend_ chart shows that when you divide by innings, something is quite off during several seasons. Eight seasons are dubious, in fact. I'm not quite inclined to throw out the bathwater lest a perfectly good baby is floating in there, so instead I imputed values using MICE. A more sensible procedure would be to use values from the other sources, but I wanted MICE practice.
+The MLB API appears to have the most complete record of game duration, but keep in mind that this data is pre-summarized at the season level, so 100% coverage since 1900 just means the API returned a sum of minutes for each season. The _Trend_ chart shows that when you divide by innings, something is quite off during several seasons. Eight seasons are dubious, in fact. I'm not quite inclined to throw out the bathwater lest a perfectly good baby is floating in there, so instead I imputed values using MICE. A more sensible procedure would be to use values from the other sources, but I wanted MICE practice. More on how to use MICE in [my blog](https://mpfoley73.netlify.app/post/2022-07-26-imputing-values-with-mice/).
 
 The Baseball-Reference data is somewhat compromised in the definition of innings. A nine-inning might be 27+27=54 outs, or only 51 if the home team won. So the Cleveland duration per 9-innings is biased somewhat low - ~50% of games are 3/54 shorter, so avg duration is probably 4-5 minutes longer.
 
@@ -446,7 +446,7 @@ bind_rows(
   `Baseball-Reference` = bref_cle_season_ts %>% select(season, G, na_dur) %>% as_tibble(),
   `MLB API` = mlb_season_ts_0 %>% select(season, G) %>% as_tibble(),
   `Retrosheet (g)` = retro_season_g_ts %>% select(season, G, na_dur),
-  `Retrosheet (e)` = retro_season_e_ts %>% select(season, G, na_dur),
+  `Retrosheet (e)` = retro_season_e_ts_0 %>% select(season, G, na_dur),
   .id = "Source"
 ) %>%
   replace_na(list(na_dur = 0)) %>%
@@ -470,6 +470,8 @@ bind_rows(
   theme(axis.text.x = element_text(angle = 90, vjust = .5))
 ```
 
+<font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`a. Missingness</b>. Only the MLB API had duration data for all seasons back to 1900.</font><br>
+
 ### Trend
 
 ```{r warning=FALSE}
@@ -477,7 +479,7 @@ bind_rows(
   `Baseball-Reference (Cleve)` = bref_cle_season_ts %>% select(season, hrs_9I) %>% as_tibble(),
   `MLB API` = mlb_season_ts_0 %>% select(season, hrs_9I) %>% as_tibble(),
   `Retrosheet (g)` = retro_season_g_ts %>% select(season, hrs_9I),
-  `Retrosheet (e)` = retro_season_e_ts %>% select(season, hrs_9I),
+  `Retrosheet (e)` = retro_season_e_ts_0 %>% select(season, hrs_9I),
   .id = "Source"
 ) %>%
   ggplot(aes(x = season, y = hrs_9I, color = Source, linewidth = Source, alpha = Source)) +
@@ -496,6 +498,8 @@ bind_rows(
   guides(fill = guide_legend(reverse = TRUE)) +
   theme(axis.text.x = element_text(angle = 90, vjust = .5))
 ```
+
+<font size=-1 color="#666666"><b>Fig. `r fig_no`b. Trend</b>. The MLB API duration data has several problematic data points prior to 1930.</font><br>
 
 ### MLB API's Dubious Durations
 
@@ -521,6 +525,8 @@ mlb_season_ts_0 %>%
   theme(legend.position = "top")
 ```
 
+<font size=-1 color="#666666"><b>Fig. `r fig_no`c. MLB API's Dubious Durations</b>. A closer inspection identifies eight outliers.</font><br>
+
 ### MLB with Imputations
 
 ```{r warning=FALSE, echo=TRUE}
@@ -538,7 +544,7 @@ z <- y %>%
   mice::mice(print = FALSE, seed = 123) %>%
   complete()
 
-mlb_season_ts_1 <- y
+mlb_season_ts_1 <- mlb_season_ts_0
 mlb_season_ts_1$hrs_9I <- z$hrs_9I
 mlb_season_ts_1$mins_PA <- z$mins_PA
 ```
@@ -562,6 +568,8 @@ mlb_season_ts_1 %>%
   theme(legend.position = "top")
 ```
 
+<font size=-1 color="#666666"><b>Fig. `r fig_no`d. MLB with Imputations</b>. Using MICE to impute values produces realistic values.</font>
+
 ### New Trend
 
 ```{r warning=FALSE}
@@ -569,7 +577,7 @@ bind_rows(
   `Baseball-Reference (Cleve)` = bref_cle_season_ts %>% select(season, hrs_9I) %>% as_tibble(),
   `MLB API` = mlb_season_ts_1 %>% select(season, hrs_9I) %>% as_tibble(),
   `Retrosheet (g)` = retro_season_g_ts %>% select(season, hrs_9I),
-  `Retrosheet (e)` = retro_season_e_ts %>% select(season, hrs_9I),
+  `Retrosheet (e)` = retro_season_e_ts_0 %>% select(season, hrs_9I),
   .id = "Source"
 ) %>%
   ggplot(aes(x = season, y = hrs_9I, color = Source, linewidth = Source, alpha = Source)) +
@@ -589,18 +597,24 @@ bind_rows(
   theme(axis.text.x = element_text(angle = 90, vjust = .5))
 ```
 
+<font size=-1 color="#666666"><b>Fig. `r fig_no`e. New Trend</b>. The imputed data set now fits nicely with the others.</font>
+
 ## Plate Appearances {.tabset .tabset-fade .tabset-pills}
 
-The Baseball-Reference data under-counts plate appearances  (PAs) for Cleveland games because my definition of PAs (AB + sacs + BBs) is not quite the same as the [MLB definition](https://www.mlb.com/glossary/standard-stats/plate-appearance) of runs + outs + LOB since I didn't have the LOB. The MLB APA differs from Retrosheet slightly, a litte more prior to 1920, and a lot prior to 1910. Retrosheet looks like the more reliable source here. This time I will impute dubious MLB API values with the realistic ones from Retrosheet (g).
+The Baseball-Reference data under-counts plate appearances (PAs) for Cleveland games because my definition of PAs (AB + sacs + BBs) is not quite the same as the [MLB definition](https://www.mlb.com/glossary/standard-stats/plate-appearance) of runs + outs + LOB since I didn't have the LOB. The MLB APA differs from Retrosheet slightly, esp. prior to 1910. Retrosheet looks like the more reliable source here. This time I will impute dubious MLB API values with the realistic ones from Retrosheet (g).
+
+The trough between 1901 and 1920 is strange. Why did PA per 9 fall and rise like that? Unless I can explain this, it seems safer to only trust the data from 1920 forward.
+
+PA has a long gradual decline from 1935-1968 totaling nearly six less batters. At, say, 2:30 per PA, that might reduce game times by 15 minutes, then increase them by 15 minutes when they recovered. They never quite recovered though, and then they declined again after 2000. I don't think changes in PA explain game duration.
 
 ### Trend
 
-```{r}
+```{r warning=FALSE}
 bind_rows(
   `Baseball-Reference (Cleve)` = bref_cle_season_ts %>% select(season, PA_9I) %>% as_tibble(),
   `MLB API` = mlb_season_ts_1 %>% select(season, PA_9I) %>% as_tibble(),
   `Retrosheet (g)` = retro_season_g_ts %>% select(season, PA_9I) %>% as_tibble(),
-  `Retrosheet (e)` = retro_season_e_ts %>% select(season, PA_9I) %>% as_tibble(),
+  `Retrosheet (e)` = retro_season_e_ts_0 %>% select(season, PA_9I) %>% as_tibble(),
   .id = "Source"
 ) %>%
   # pivot_wider(values_from = PA_9I, names_from = Source)
@@ -612,20 +626,58 @@ bind_rows(
   scale_linewidth_manual(values = c(4, 1, 1, 1)) +
   scale_alpha_manual(values = c(.2, 1, 1, 1)) +
   labs(
-    title = "Sources are in near perfect alignment.",
-    subtitle = "Avg plate appearances per 9 innings of play, MLB API imputed.",
-    caption = "Note: Baseball-Reference is Cleveland games only.",
+    title = "PA problematic before 1920.",
+    subtitle = "Avg plate appearances per 9 innings of play.",
+    caption = "Note: Baseball-Reference is Cleveland games only, and uses rough approximation of PA and innings.",
     x = NULL, y = NULL, color = NULL, linewidth = NULL, alpha = NULL
   ) +
   guides(fill = guide_legend(reverse = TRUE)) +
   theme(axis.text.x = element_text(angle = 90, vjust = .5))
 ```
 
+### MLB with Imputations
 
-## f. MLB Pitches
+```{r echo=TRUE}
+mlb_season_ts_2 <- mlb_season_ts_1 %>%
+  left_join(retro_season_g_ts %>% select(season, retro_PA_9I = PA_9I), 
+             by = join_by(season)) %>%
+  mutate(PA_9I = if_else(season %in% 1901:1911, retro_PA_9I, PA_9I)) %>%
+  select(-retro_PA_9I)
+```
 
 ```{r warning=FALSE}
-mlb_season_ts_0 %>%
+bind_rows(
+  `MLB API` = mlb_season_ts_2 %>% select(season, PA_9I) %>% as_tibble(),
+  `Retrosheet (g)` = retro_season_g_ts %>% select(season, PA_9I) %>% as_tibble(),
+  `Retrosheet (e)` = retro_season_e_ts_0 %>% select(season, PA_9I) %>% as_tibble(),
+  .id = "Source"
+) %>%
+  ggplot(aes(x = season, y = PA_9I, color = Source)) +
+  geom_line() +
+  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
+  scale_y_continuous() +
+  scale_color_manual(values = pal$mlb[2:4]) +
+  labs(
+    title = "Sources are in close alignment.",
+    subtitle = "Avg plate appearances per 9 innings of play, MLB API imputed.",
+    x = NULL, y = NULL, color = NULL, linewidth = NULL, alpha = NULL
+  ) +
+  guides(fill = guide_legend(reverse = TRUE)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = .5))
+```
+
+## Pitches {.tabset .tabset-fade .tabset-pills}
+
+There is no recorded pitch counts until 1950 and until 1988 the values are less than half of what seems reasonable. The 1988-1998 values are still low and variable. Only 1999-present are consistent. I am nulling out all pitch counts prior to 1999. The pared down data set shows a small upward trend of about 10 additional pitches per nine innings since 1999.
+
+### Trend
+
+```{r warning=FALSE}
+bind_rows(
+  `MLB API` = mlb_season_ts_2 %>% select(season, P_9I) %>% as_tibble(),
+  `Retrosheet (e)` = retro_season_e_ts_0 %>% select(season, P_9I) %>% as_tibble(),
+  .id = "Source"
+) %>%
   mutate(
     status = factor(
       case_when(season < 1988 ~ "Definitely bad",
@@ -634,75 +686,173 @@ mlb_season_ts_0 %>%
       levels = c("Definitely bad", "Suspicious", "Probably good")
     )
   ) %>%
-  ggplot(aes(x = season, y = P_9I, color = status)) + 
+  ggplot(aes(x = season, y = P_9I, shape = status, color = Source)) + 
   geom_point() +
-  scale_color_manual(values = c("#E31937", "#efb21e", "#003831")) +
+  scale_color_manual(values = pal$mlb[2:3]) +
   labs(
-    title = "MLB pitch count data is not reliable until 1999.", 
+    title = "Pitch count data is not reliable until 1999.", 
     subtitle = "Average pitches per nine innings.",
-    caption = "Source: MLB Stats API.",
+    x = NULL, y = NULL, color = NULL, shape = NULL
+  )
+```
+
+### New Trend
+
+```{r}
+mlb_season_ts_3 <- mlb_season_ts_2 %>% 
+  mutate(
+    across(c(P_9I, P_PA, P_pitcher, secs_P), ~if_else(season < 1999, NA_real_, .))
+  )
+
+retro_season_e_ts <- retro_season_e_ts_0 %>%
+  mutate(
+    across(c(P_9I, P_PA, P_pitcher, secs_P), ~if_else(season < 1999, NA_real_, .))
+  )
+```
+
+```{r warning=FALSE}
+bind_rows(
+  `MLB API` = mlb_season_ts_3 %>% select(season, P_9I) %>% as_tibble(),
+  `Retrosheet (e)` = retro_season_e_ts %>% select(season, P_9I) %>% as_tibble(),
+  .id = "Source"
+) %>%
+  ggplot(aes(x = season, y = P_9I, color = Source)) + 
+  geom_point() +
+  geom_smooth(method = "loess", formula = "y~x", se = TRUE) +
+  scale_color_manual(values = pal$mlb[2:3]) +
+  labs(
+    title = "Sources are in close alignment.",
+    subtitle = "Avg pitches per nine innings, MLB API and Retrosheet (e) pared.",
     x = NULL, y = NULL, color = NULL
   )
 ```
 
-# {-}
+## Pitchers {.tabset .tabset-fade .tabset-pills}
 
-<font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`. <br>
-season was partial and played with no in-person spectators due to the Covid pandemic.<br>
-<b>b</b>. Cleveland games with no recorded duration in Baseball-Reference</b>. Data is not reliably recorded until 1920.<br>
-</font>
-<b>c</b>. MLB games with no recorded duration in Retrosheet game logs. Coverage is about the same as Baseball-Reference.<.br>
-<b>d</b>. MLB games with no recorded duration in Retrosheet event logs. Note: the event logs start in 1914.<.br>
-<b>f</b>. MLB pitches per nine innings in MLB API data</b>. There is no recorded pitch counts until 1950 and until 1988 the values are less than half of what seems reasonable. The 1988-1998 values are still low and variable. Only 1999-present are consistent.<br>
+The three sources of pitcher counts are consistent. The MLB API and Retrosheet game (g) start in 1901, and Retrosheet event (e) starts in 1914. The Retrosheet event logs provide details about when pitching substitutions take place. The drop-off of begin-inning substitutions in 1973 coincides with the introduction of the designated hitter, so that makes sense. The temporary increase in mid-inning substitutions in 2020 might have something to do with COVID. 
 
-# Game Duration {.tabset .tabset-fade .tabset-pills}
-
-I used MICE (more on technique, [here](https://mpfoley73.netlify.app/post/2022-07-26-imputing-values-with-mice/)) to impute values for the suspicious MLB API data durations.
-
-
-# {-}
-
-<font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`. <br>
-<b>a</b>. MLB game duration data has several outliers in MLB API</b>. Eight values are suspicious, the most recent in 1928 and 1929.<br>
-<b>b</b>. MLB game duration data with imputed values for outliers</b>. Values imputed with [MICE](https://mpfoley73.netlify.app/post/2022-07-26-imputing-values-with-mice/). <br>Source: MLB Stats API.</font>
-
-## Stolen Bases
+### Total
 
 ```{r warning=FALSE}
-mlb_season_ts_1 %>% 
+bind_rows(
+  `MLB API` = mlb_season_ts_3 %>% select(season, pitchers_9I) %>% as_tibble(),
+  `Retrosheet (g)` = retro_season_g_ts %>% select(season, pitchers_9I) %>% as_tibble(),
+  `Retrosheet (e)` = retro_season_e_ts %>% select(season, pitchers_9I) %>% as_tibble(),
+  .id = "Source"
+) %>%
+  ggplot(aes(x = season, y = pitchers_9I, color = Source)) + 
+  geom_point() +
+  scale_y_continuous(labels = comma_format(1)) +
+  coord_cartesian(ylim = c(0, 10)) +
+  scale_color_manual(values = pal$mlb[2:4]) +
+  labs(
+    title = "Count of pitchers is consistent across time and sources.",
+    subtitle = "Avg pitchers per nine innings.",
+    x = NULL, y = NULL, color = NULL
+  )
+```
+
+<font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`a. Total</b>. All three sources have pitchers per game. MLB API stretches all the way back to 1900 and includes the current season YTD. Retrosheet games start in 1901. Retrosheet event log data starts in 1914.</font>
+
+### Mid-inning Substitutions
+
+```{r warning=FALSE}
+bind_rows(
+  `Total` = retro_season_e_ts %>% select(season, y = pitchers_9I) %>% as_tibble(),
+  `Mid-inning` = retro_season_e_ts %>% select(season, y = pitsubsmi_9I) %>% as_tibble(),
+  `Start-inning` = retro_season_e_ts %>% select(season, y = pitsubsbi_9I) %>% as_tibble(),
+  .id = "Source"
+) %>%
+  ggplot(aes(x = season, y = y, color = Source)) + 
+  geom_point() +
+  scale_y_continuous(labels = comma_format(1), breaks = 0:10) +
+  coord_cartesian(ylim = c(0, 10)) +
+  scale_color_manual(values = pal$mlb[3:5]) +
+  labs(
+    title = "Begin-inning pitching substitutions have driven the increased appearances.",
+    subtitle = "Avg pitchers per nine innings.",
+    x = NULL, y = NULL, color = NULL
+  )
+
+
+retro_season_e_ts %>%
+  # as_tibble() %>%
+  pivot_longer(cols = c(pitchers_9I, pitsubsmi_9I, pitsubsbi_9I), names_to = "Source", values_to = "y") %>%
+  ggplot(aes(x = season, y = y, color = Source)) + 
+  geom_point() +
+  scale_y_continuous(labels = comma_format(1), breaks = 0:10) +
+  coord_cartesian(ylim = c(0, 10)) +
+  scale_color_manual(values = pal$mlb[3:5]) +
+  labs(
+    title = "Begin-inning pitching substitutions have driven the increased appearances.",
+    subtitle = "Avg pitchers per nine innings.",
+    x = NULL, y = NULL, color = NULL
+  )
+```
+
+<font size=-1 color="#666666"><b>Fig. `r fig_no`b. Mid-inning Substitutions</b>. </font>
+
+## Stolen Bases {.tabset .tabset-fade .tabset-pills}
+
+The stolen base data is less important because it shouldn't affect game duration, but changes to its frequency are a bi-product of the 2023 rule changes related to base width and pick-off attempts. The caught-steeling data prior to 1926 is clearly not to be trusted, but what about the caught-stealing data from 1926 - 1950? I'm inclined to null out all of the caught-steeling data prior to 1951. There are also two outliers in 1914 and 1915. I don't have an explanation for why they would pop up like that and it's a big change from the prior trend. The 1914 outlier looks like it could be stolen base _attempts_. I will impute values for 1914 and 1915.
+
+### Trend 
+
+```{r warning=FALSE}
+mlb_season_ts_3 %>% 
   pivot_longer(cols = c(SB_9I, CS_9I)) %>%
   ggplot(aes(x = season, y = value, color = name)) +
   geom_point() +
   scale_color_manual(values = c("#003831", "#fd5a1e")) +
+  coord_cartesian(ylim = c(0, 4)) +
   labs(
-    title = "Stolen base data is suspicious prior to 1953.",
-    subtitle = "Stolen bases per nine innings (points) and success rate (area).",
+    title = "Stolen base data is suspicious prior to 1951.",
+    subtitle = "Stolen bases per nine innings.",
     x = NULL, y = "Count", color = NULL
   )
 ```
 
-<font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`. MLB pitches per nine innings</b>. There is no recorded pitch counts until 1950 and until 1988 the values are less than half of what seems reasonable. The 1988-1998 values are still low and variable. Only 1999-present are consistent. <b>Source: MLB Stats API</b>.</font>
+<font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`a. Stolen bases per nine innings</b>.</font>
 
-# Feature Engineering
+### Redacted and Imputed
 
-As with the Baseball Reference data, I will standardize the MLB data into per-nine-innings and other related levels.
+```{r echo=TRUE}
+# Remove everything related to pitch counts prior to 1999.
+mlb_season_ts <- mlb_season_ts_3 %>%
+  mutate(
+    SB_9I = if_else(season %in% 1914:1915, NA_real_, SB_9I),
+    CS_9I = if_else(season < 1951, NA_real_, CS_9I)
+  )
 
-```{r echo=TRUE, class.source='fold-show'}
-mlb_season_ts <- mlb_season_ts_1 #%>%
-  # mutate(
-  #   dur_per_PA = dur / PA,
-  #   dur_per_P = dur / P,
-  #   dur_per_R = dur / R,
-  #   hrs_per_G = time_length(dur_per_G, "hours"),
-  #   hrs_per_9 = time_length(dur_per_9, "hours")
-  # )
+# Use MICE to impute values in the time cols
+x <- mlb_season_ts %>%
+  select(season, SB_9I) %>%
+  mice::mice(print = FALSE, seed = 123) %>%
+  complete()
+
+mlb_season_ts$SB_9I <- x$SB_9I
+```
+
+```{r warning=FALSE}
+mlb_season_ts %>% 
+  pivot_longer(cols = c(SB_9I, CS_9I)) %>%
+  ggplot(aes(x = season, y = value, color = name)) +
+  geom_point() +
+  scale_color_manual(values = c("#003831", "#fd5a1e")) +
+  coord_cartesian(ylim = c(0, 4)) +
+  labs(
+    title = "Stolen base data, 1914-15 imputed, CS redacted prior to 1951.",
+    subtitle = "Stolen bases per nine innings.",
+    x = NULL, y = "Count", color = NULL
+  )
+
 ```
 
 # Feature Exploration
 
-These subsections take a closer look at the features in the data set. The main purpose is characterize the relationships with the `hours_per_9` outcome variable, and possibly reduce the field of explanatory variables. Some variables, like `home_att_G`, are not useful toward understanding game duration, but are worth a look just because they are interesting.
+These subsections take a closer look at the time-related features in the data set.
 
-## Game Duration {.tabset}
+## Game Duration
 
 ```{r}
 max_avg <- mlb_season_ts %>% slice_max(order_by = hrs_9I)
@@ -710,139 +860,35 @@ avg_2023 <- mlb_season_ts %>% filter(season == 2023)
 max_m_23 <- (max_avg[1, ]$hrs_9I - avg_2023[1, ]$hrs_9I) * 60
 ```
 
-Games typically lasted around two hours up to 1945. Then over the course of ten seasons game times increased to 2.5 hours. In the late 1970s games began increasing again, peaking at `r max_avg %>% pull(hrs_9I) %>% pretty_hm(verbose = TRUE)` in `r max_avg %>% pull(season)`. Significant changes in 2023 appear to have halted the advance. Average game times in 2023 have been `r avg_2023 %>% pull(hrs_9I) %>% pretty_hm(verbose = TRUE)` year to date, a `r comma(max_m_23)` minute reduction. Doug Pappas chronicled the increased playing times in the Summer 1995 issue of Outside the Lines, the SABR Business of Baseball Committee newsletter. Pappas found a Sporting News article from 1962 blaming longer game times on full counts, pitching changes, and delays between pitches.^[Doug Pappas. Originally published in the Summer 1995 issue of Outside the Lines, the SABR Business of Baseball Committee newsletter. [html](http://roadsidephotos.sabr.org/baseball/95gamelength.htm).]
-
-Average game duration does not appear to change much within seasons.  
-
-### By Year
+Games typically lasted around two hours up to 1945. Then over the course of ten seasons game times shot up to 2.5 hours. In the late 1970s games began another decade-long increase, hitting `r mlb_season_ts %>% filter(season == 1988) %>% pull(hrs_9I) %>% pretty_hm(verbose = TRUE)` in 1988. After 2011, game time began a third period of increase, reaching `r max_avg %>% pull(hrs_9I) %>% pretty_hm(verbose = TRUE)` in `r max_avg %>% pull(season)`. Several rule changes introduced in 2023 appear to have halted the advance. Average game times in 2023 through `r max(bref_cle_games$game_date) %>% format("%b %d, %Y")` have been `r avg_2023 %>% pull(hrs_9I) %>% pretty_hm(verbose = TRUE)`, a `r comma(max_m_23)` minute reduction. 
 
 ```{r}
-knot_yrs <- c(1944, 1955, 1978, 2021, 2023)
+knot_yrs <- c(1901, 1944, 1955, 1978, 1988, 2011, 2021, 2023)
 
 model(mlb_season_ts, TSLM(hrs_9I ~ trend(knots = knot_yrs))) %>%
   augment() %>%
   ggplot(aes(x = season)) +
-  geom_line(aes(y = hrs_9I), color = "#003831", linewidth = 1) +
-  geom_line(aes(y = .fitted), color = "#fd5a1e", linetype = 2, linewidth = .5) +
+  geom_line(aes(y = .fitted), color = pal$sfg["O"], linewidth = 1.5, alpha = .5) +
+  geom_point(aes(y = hrs_9I), color = pal$sfg["B"]) +
   geom_text(data = mlb_season_ts %>% filter(season %in% knot_yrs), 
             aes(y = hrs_9I + if_else(season == 2021, +.15, -.15), label = pretty_hm(hrs_9I)), 
-            family = "Rockwell", size = 3.5, color = "#003831", hjust = 0) + 
+            family = "Rockwell", size = 3.5, color = pal$sfg["B"], hjust = 0) + 
   geom_point(data = mlb_season_ts %>% filter(season %in% knot_yrs), 
              aes(y = hrs_9I),
-             color = "#fd5a1e", size = 2) +
+             color = pal$sfg["O"], size = 2) +
   scale_x_continuous(breaks = seq(1900, 2030, 10)) +
   scale_y_continuous(limits = c(0, NA), n.breaks = 8, labels = pretty_hm) +
   coord_cartesian(xlim = c(1900, 2030), ylim = c(0, 3.5)) +
   labs(
-    title = "Game duration increased in two phases: 1945-1955 and 1979-2021.",
-    subtitle = "Average game duration per nine innings, 1901-2023",
+    title = "Pace of play slowed in three phases: 1945-55, 1978-88, and 2011-21.",
+    subtitle = "Average game duration per nine innings, 1901-2023.",
     x = NULL, y = NULL
   )
 ```
 
-<font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`. Average elapsed time per nine innings of play</b>. Average elapsed time was stable at around two hours until a dramatic increase of 30 minutes from 1945-1955. Another 30 minutes were added between 1979 and 2000, peaking at `r max_avg %>% pull(hrs_9I) %>% pretty_hm(verbose = TRUE)` in `r max_avg %>% pull(season)`.</font>
+<font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`. Average elapsed time per nine innings of play</b>. Source: MLB-API, 1901-`r max(bref_cle_games$game_date) %>% format("%b %d, %Y")`.</font>
 
-### CLE
-
-```{r}
-model(bref_cle_season_ts, TSLM(hrs_9I ~ trend(knots = knot_yrs))) %>%
-  augment() %>%
-  ggplot(aes(x = season)) +
-  geom_line(aes(y = hrs_9I), color = "#0C2340", linewidth = 1) +
-  geom_line(aes(y = .fitted), color = "#E31937", linetype = 2, linewidth = .5) +
-  geom_text(data = bref_cle_season_ts %>% filter(season %in% knot_yrs), 
-            aes(y = hrs_9I + if_else(season == 2021, +.15, -.15), label = pretty_hm(hrs_9I)), 
-            family = "Rockwell", size = 3.5, color = "#0C2340", hjust = 0) + 
-  geom_point(data = bref_cle_season_ts %>% filter(season %in% knot_yrs), 
-             aes(y = hrs_9I),
-             color = "#E31937", size = 2) +
-  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
-  scale_y_continuous(limits = c(0, NA), n.breaks = 8, labels = pretty_hm) +
-  coord_cartesian(xlim = c(1900, 2030), ylim = c(0, 3.5)) +
-  labs(
-    title = "Cleve game duration increased in two phases: 1945-1955 and 1979-2021.",
-    subtitle = "Average game duration per nine innings, 1901-2023",
-    x = NULL, y = NULL
-  )
-```
-
-<font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`. Cleveland average elapsed time per nine innings of play</b>. Cleveland game duration data follow the MLB Stats API values.</font>
-
-## Doubleheaders {.tabset}
-
-```{r}
-double_header <- bref_cle_games_ts %>%
-  mutate(doubleheader_ind = if_else(doubleheader_game == 0, "Single Game", "Doubleheader")) %>%
-  index_by(season = ~ year(.)) %>%
-  group_by(season, doubleheader_ind) %>%
-  summarize(hrs_9I = mean(hrs_9I, na.rm = TRUE), n = n())
-
-double_header_effect <- double_header %>%
-  as_tibble() %>%
-  pivot_wider(id_cols = season, names_from = doubleheader_ind, values_from = hrs_9I) %>%
-  mutate(twin_diff = `Doubleheader` - `Single Game`)
-```
-
-Prior to 1942, a few doubleheaders would be scheduled each season. There doesn't appear to be a pattern: it might be on a Tuesday, for instance. Sunday doubleheaders became common in 1942, either scheduled or as make-ups. In 1943, most Sundays were scheduled doubleheaders and over 50% of baseball games overall were part of a doubleheader. Scheduled doubleheaders, esp. Sundays, were common through 1978. After that, only two or three might be scheduled.
-
-Doubleheaders have become less common while game times have increased. Is there a negative correlation, perhaps a compensating effect? The answer is no, doubleheaders are irrelevant. The average doubleheader game is shorter by only `r scales::comma(mean(double_header_effect$twin_diff, na.rm = TRUE) * 60 * (-1), accuracy = 1)` minutes.
-
-```{r}
-SF <- 50 # scaling factor for sec.axis.
-double_header %>%
-  ggplot(aes(x = season)) +
-  geom_col(aes(y = n / SF, fill = fct_rev(doubleheader_ind)), alpha = 0.2, width = 1.0) +
-  geom_line(aes(y = hrs_9I, color = fct_rev(doubleheader_ind)), linewidth = 1) +
-  scale_color_manual(values = as.character(pal$cle)) +
-  scale_fill_manual(values = as.character(pal$cle)) +
-  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
-  scale_y_continuous(limits = c(0, NA), n.breaks = 4, labels = pretty_hm,
-    sec.axis = sec_axis(trans = ~ .x * SF, labels = comma_format(), name = "Games Played")
-  ) +
-  coord_cartesian(xlim = c(1900, 2030), ylim = c(0, 3.5)) +
-  labs(x = NULL, y = "Hours", color = NULL, fill = NULL,
-       titletitle = glue("Doubleheader games are shorter by only {scales::comma(mean(double_header_effect$twin_diff, na.rm = TRUE) * 60 * (-1), accuracy = 1)} minutes on average."),
-       subtitle = "Cleveland doubleheader game duration.",
-       caption = "source: www.baseball-reference.com.") +
-  theme(
-    legend.position = "top",
-    axis.title.y.right = element_text(margin = margin(l = 5))
-  )
-```
-
-## Night Games
-
-```{r}
-day_night <- bref_cle_games_ts %>%
-  index_by(season = ~ year(.)) %>%
-  group_by(season, day_ind) %>%
-  summarize(hrs_9I = mean(hrs_9I, na.rm = TRUE), n = n())
-```
-
-Until the late 1930s, all games were played in the afternoon. By the mid 1970s day games were primarily on weekends. While there might be a different dynamic to paying in the afternoon (*it's hot - let's get out of here!*), the data doesn't bear that out. The advent of night games is not associated with longer games.
-
-```{r}
-SF <- 50 # scaling factor for sec.axis.
-day_night %>%
-  ggplot(aes(x = season)) +
-  geom_col(aes(y = n / SF, fill = day_ind), alpha = 0.2, width = 1.0) +
-  geom_line(aes(y = hrs_9I, color = day_ind), linewidth = 1) +
-  scale_color_manual(values = as.character(pal$cle)) +
-  scale_fill_manual(values = as.character(pal$cle)) +
-  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
-  scale_y_continuous(limits = c(0, NA), n.breaks = 4, labels = pretty_hm,
-    sec.axis = sec_axis(trans = ~ .x * SF, labels = comma_format(), name = "Games Played")
-  ) +
-  coord_cartesian(xlim = c(1900, 2030), ylim = c(0, 3.5)) +
-  labs(x = NULL, y = "Hours", color = NULL, fill = NULL,
-       title = "Night games are more common, but they're not longer.",
-       subtitle = "Cleveland Indians average game duration, with periods of growth and stability.",
-       caption = "source: www.baseball-reference.com.") +
-  theme(
-    legend.position = "top",
-    axis.title.y.right = element_text(margin = margin(l = 5))
-  )
-```
+Doug Pappas chronicled the increased playing times in the Summer 1995 issue of Outside the Lines, the SABR Business of Baseball Committee newsletter. Pappas found a Sporting News article from 1962 blaming longer game times on full counts, pitching changes, and delays between pitches.^[Doug Pappas. Originally published in the Summer 1995 issue of Outside the Lines, the SABR Business of Baseball Committee newsletter. [html](http://roadsidephotos.sabr.org/baseball/95gamelength.htm).] I'll consider these hypotheses and others below. In most cases I will normalize the data to -per-nine-innings of play.
 
 ## Offense {.tabset}
 
@@ -859,7 +905,7 @@ lm_K_trend <- mlb_season_ts %>% model(TSLM(hrs_9I ~ log(SO_9I) + trend()))
 lm_K_trend %>% report()
 ```
 
-The number of plate appearances per game has not changed much over time (Fig. `r (fig_no + 1)`). However, the offensive outcomes have (Fig. `r (fig_no + 2)`). Strikeouts in particular have increased with game times and alone can explain about `r percent(r2_K, 1)` of the variation in average game duration (Fig. `r (fig_no + 2)`). 
+Let's start with plate appearances per nine innings of play (PA_9I). It has not changed much over time (Fig. `r (fig_no + 1)`). However, the offensive outcomes have (Fig. `r (fig_no + 2)`). Strikeouts in particular have increased with game times and alone can explain about `r percent(r2_K, 1)` of the variation in average game duration (Fig. `r (fig_no + 2)`). 
 
 ### PA Trend
 
@@ -882,6 +928,35 @@ mlb_season_ts %>%
 
 <font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`. Plate appearances (line) and game duration (shaded), per nine-innings</b>. The amount of game activity, summarized here by plate appearances, has changed little and is an unlikely explanation for the long term trend in game duration.<br> source: MLB Stats API.</font>
 
+```{r warning=FALSE}
+lbl_yr <- c(1901, 2023)
+hrs_9I_1901 <- mlb_1901 <- mlb_season_ts %>% filter(season == 1901) %>% pull(hrs_9I)
+PA_9I_1901 <- mlb_1901 <- mlb_season_ts %>% filter(season == 1901) %>% pull(PA_9I)
+
+mlb_season_ts %>%
+  mutate(
+    std_hrs_9I = hrs_9I / hrs_9I_1901,
+    std_PA_9I = PA_9I / PA_9I_1901,
+  ) %>%
+  ggplot(aes(x = season)) +
+  geom_line(aes(y = std_hrs_9I), color = pal$sfg["B"], linewidth = 2, alpha = 0.15) +
+  geom_line(aes(y = std_PA_9I), color = pal$sfg["O"], linewidth = 1) +
+  geom_point(aes(y = if_else(season %in% lbl_yr, std_PA_9I, NA_real_)),
+             color = pal$sfg["O"], size = 2) +
+  geom_text(aes(x = season + 1,
+                y = if_else(season %in% lbl_yr, std_PA_9I + .05, NA_real_),
+                label = comma(PA_9I, .1)),
+            family = "Rockwell", size = 3.5, color = pal$sfg["O"], hjust = 0) +
+  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
+  scale_y_continuous(labels = ~ percent(.x - 1)) +
+  coord_cartesian(xlim = c(1900, 2030)) +
+  labs(
+    title = "Changes in plate appearances are unrelated to pace of play",
+    subtitle = "Changes in plate appearances and game duration since 1901.",
+    x = NULL, y = NULL
+  )
+```
+
 ### Walks, Hits, K's
 
 ```{r}
@@ -895,7 +970,7 @@ mlb_season_ts %>%
     limits = c(0, NA), 
     sec.axis = sec_axis(trans = ~ . / 6.5, labels = comma_format(.1), breaks = 5/6.5 * c(1:4), name = "hours per 9")
   ) +
-  scale_color_discrete(labels = c(BB_per_9 = "Walks", H_per_9 = "Hits", K_per_9 = "K's", R_per_9 = "Runs")) +
+  scale_color_discrete(labels = c(BB_9I = "Walks", H_9I = "Hits", SO_9I = "K's", R_per_9 = "Runs")) +
   labs(
     title = "Strikeouts are correlated with game duration.",
     subtitle = "Offensive metrics (lines) and game duration (shaded), per nine-innings.",
@@ -903,7 +978,7 @@ mlb_season_ts %>%
   )
 ```
 
-<font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`. Offensive metrics (lines) and game duration (shaded), per nine-innings</b>. Of the main offense metrics, strikeouts come closest to matching the trend in game duration. In fact, strikeouts alone explain about `r percent(r2_K, 1)` of the variation in average game duration. Strikeouts climbed gradually after the dead-ball era, then more sharply after WWII. They declined from the mid-60's to 1980, but have climbed since then, peaking at `r comma(max_K[1, ]$K_per_9, .1)` in `r max_K[1, ]$season`.<br>Source: MLB Stats API.</font>
+<font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`. Offensive metrics (lines) and game duration (shaded), per nine-innings</b>. Of the main offense metrics, strikeouts come closest to matching the trend in game duration. In fact, strikeouts alone explain about `r percent(r2_K, 1)` of the variation in average game duration. Strikeouts climbed gradually after the dead-ball era, then more sharply after WWII. They declined from the mid-60's to 1980, but have climbed since then, peaking at `r comma(max_K[1, ]$SO_9I, .1)` in `r max_K[1, ]$season`.<br>Source: MLB Stats API.</font>
 
 ### K-Duration Correlation
 
@@ -926,11 +1001,47 @@ bind_cols(
 
 <font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`. Log of strikeouts per nine innings vs game duration</b>. Blue labeled points are influential. Fit line shows evidence of autocorrelation, suggesting there are other factors influencing game times. R-squared is `r comma(r2_K, .01)`. <b>Source</b>: MLB Stats API.</font>
 
+## Mid-inning pitching substitutions
+
+From 1914-1972, pitchers per game increased from 3 to 5, driven by mid-inning pitching changes. Then pitcher counts increased more quickly as managers began changing pitchers at the start of innings. Something is amiss in 2020-2022. In 2020, MLB introduced the [three-batter minimum](https://www.rookieroad.com/baseball/three-batter-minimum-rule-0641152/#:~:text=of%20Play%20Rules-,Definition,are%20removed%20from%20the%20game.) rule for relievers. That reduced mid-inning pitching changes by about one. Why did mid-inning changes temporarily revert to trend in 2021? I suspect the explanation
+
+
 ## Pitching {.tabset}
 
 From 1901-1990, each pitching change was associated with about 20 minutes of additional game time. After 1990 the number of pitchers used per game continued to increase while game duration leveled off. After 1990 each pitching change is associated with about 6 minutes of additional game time. 20 minutes per additional pitcher seems high, even if you factor in a mound visit from the pitching coach to buy time for the reliever to warm up. This and the post-1990 divergence suggests there is another factor, something often correlated with the number of pitchers used, but ultimately independent of it.
 
 ### Trend
+
+```{r warning=FALSE}
+lbl_yr <- c(1901, 2023)
+retro_season_e_ts %>%
+  mutate(
+    std_hrs_9I = hrs_9I / mean(hrs_9I),
+    std_pitchers_9I = pitsubsmi_9I / mean(pitsubsmi_9I),
+    # std_min_per_pitcher = min_per_pitcher / mean(min_per_pitcher)
+  ) %>%
+  ggplot(aes(x = season)) +
+  geom_area(aes(y = std_hrs_9I), fill = "gray20", alpha = .10) +
+  geom_line(aes(y = std_pitchers_9I), color = "#003831", linewidth = 1) +
+  # # geom_line(aes(y = std_min_per_pitcher), color = "#efb21e", linewidth = 1) +
+  geom_point(aes(y = if_else(season %in% lbl_yr, std_pitchers_9I, NA_real_)),
+             color = "#fd5a1e", size = 2) +
+  geom_text(aes(x = season + 1,
+                y = if_else(season %in% lbl_yr, std_pitchers_9I + .1, NA_real_),
+                label = comma(pitchers_9I, .1)),
+            family = "Rockwell", size = 3.5, color = "#fd5a1e", hjust = 0) +
+  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
+  scale_y_continuous(breaks = seq(0, 10, 1) / mean(mlb_season_ts$pitchers_9I), 
+                     labels = ~ comma(.x * mean(mlb_season_ts$pitchers_9I), 1)) +
+  coord_cartesian(xlim = c(1900, 2030), ylim = c(0, NA)) +
+  # theme(axis.text.y = element_blank()) +
+  labs(
+    title = "Pitchers per per nine innings",
+    subtitle = "against backdrop of average game time.",
+    caption = "Source: MLB Stats API.",
+    x = NULL, y = NULL
+  )
+```
 
 ```{r warning=FALSE}
 lbl_yr <- c(1901, 2023)
@@ -1024,37 +1135,6 @@ mlb_season_ts %>%
 ```
 
 <font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`. Stolen base attempts and success rate</b>. Attempts and success rate are up in 2023, but attempts are still well below modern era max in 1987. <b>Source</b>: MLB Stats API.</font>
-
-## Plate Appearances
-
-```{r warning=FALSE}
-lbl_yr <- c(1901, 2023)
-mlb_season_ts %>%
-  mutate(
-    std_hrs_9I = hrs_9I / mean(hrs_9I),
-    std_PA_9I = PA_9I / mean(PA_9I),
-  ) %>%
-  ggplot(aes(x = season)) +
-  geom_area(aes(y = std_hrs_9I), fill = "gray20", alpha = .10) +
-  geom_line(aes(y = std_PA_9I), color = "#003831", linewidth = 1) +
-  geom_point(aes(y = if_else(season %in% lbl_yr, std_PA_9I, NA_real_)),
-             color = "#fd5a1e", size = 2) +
-  geom_text(aes(x = season + 1,
-                y = if_else(season %in% lbl_yr, std_PA_9I + .1, NA_real_),
-                label = comma(PA_9I, .1)),
-            family = "Rockwell", size = 3.5, color = "#fd5a1e", hjust = 0) +
-  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
-  scale_y_continuous(breaks = seq(0, 100, 25) / mean(mlb_season_ts$PA_9I), 
-                     labels = ~ comma(.x * mean(mlb_season_ts$PA_9I), .1)) +
-  coord_cartesian(xlim = c(1900, 2030), ylim = c(0, NA)) +
-  # theme(axis.text.y = element_blank()) +
-  labs(
-    title = "Plate Appearances per per nine innings",
-    subtitle = "against backdrop of average game time.",
-    caption = "Source: MLB Stats API.",
-    x = NULL, y = NULL
-  )
-```
 
 ## Pitches {.tabset}
 
@@ -1320,3 +1400,82 @@ x %>%
 ```
 
 <font size=-1 color="#666666"><b>Fig. `r (fig_no <- fig_no + 1)`</b>. Cleveland attendance peaked in 1999 and was `r bref_cle_season_ts %>% filter(season == 2022) %>% pull(home_att_G) %>% comma(1)` in 2022. 2023 through `r max(bref_cle_games$game_date) %>% format("%b %d")` is `r bref_cle_season_ts %>% filter(season == 2023) %>% pull(home_att_G) %>% comma(1)`. Major League Baseball attendance peaked in 2007. 2022 attendance averaged `r retro_season_g_ts %>% filter(season == 2022) %>% pull(att_G) %>% comma(1)`.<br>Source: MLB API, Retrosheet.</font>
+
+# Appendix B: Other Clevaland Trends
+
+## Doubleheaders {.tabset}
+
+```{r}
+double_header <- bref_cle_games_ts %>%
+  mutate(doubleheader_ind = if_else(doubleheader_game == 0, "Single Game", "Doubleheader")) %>%
+  index_by(season = ~ year(.)) %>%
+  group_by(season, doubleheader_ind) %>%
+  summarize(hrs_9I = mean(hrs_9I, na.rm = TRUE), n = n())
+
+double_header_effect <- double_header %>%
+  as_tibble() %>%
+  pivot_wider(id_cols = season, names_from = doubleheader_ind, values_from = hrs_9I) %>%
+  mutate(twin_diff = `Doubleheader` - `Single Game`)
+```
+
+Prior to 1942, a few doubleheaders would be scheduled each season. There doesn't appear to be a pattern: it might be on a Tuesday, for instance. Sunday doubleheaders became common in 1942, either scheduled or as make-ups. In 1943, most Sundays were scheduled doubleheaders and over 50% of baseball games overall were part of a doubleheader. Scheduled doubleheaders, esp. Sundays, were common through 1978. After that, only two or three might be scheduled.
+
+Doubleheaders have become less common while game times have increased. Is there a negative correlation, perhaps a compensating effect? The answer is no, doubleheaders are irrelevant. The average doubleheader game is shorter by only `r scales::comma(mean(double_header_effect$twin_diff, na.rm = TRUE) * 60 * (-1), accuracy = 1)` minutes.
+
+```{r}
+SF <- 50 # scaling factor for sec.axis.
+double_header %>%
+  ggplot(aes(x = season)) +
+  geom_col(aes(y = n / SF, fill = fct_rev(doubleheader_ind)), alpha = 0.2, width = 1.0) +
+  geom_line(aes(y = hrs_9I, color = fct_rev(doubleheader_ind)), linewidth = 1) +
+  scale_color_manual(values = as.character(pal$cle)) +
+  scale_fill_manual(values = as.character(pal$cle)) +
+  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
+  scale_y_continuous(limits = c(0, NA), n.breaks = 4, labels = pretty_hm,
+    sec.axis = sec_axis(trans = ~ .x * SF, labels = comma_format(), name = "Games Played")
+  ) +
+  coord_cartesian(xlim = c(1900, 2030), ylim = c(0, 3.5)) +
+  labs(x = NULL, y = "Hours", color = NULL, fill = NULL,
+       titletitle = glue("Doubleheader games are shorter by only {scales::comma(mean(double_header_effect$twin_diff, na.rm = TRUE) * 60 * (-1), accuracy = 1)} minutes on average."),
+       subtitle = "Cleveland doubleheader game duration.",
+       caption = "source: www.baseball-reference.com.") +
+  theme(
+    legend.position = "top",
+    axis.title.y.right = element_text(margin = margin(l = 5))
+  )
+```
+
+## Night Games
+
+```{r}
+day_night <- bref_cle_games_ts %>%
+  index_by(season = ~ year(.)) %>%
+  group_by(season, day_ind) %>%
+  summarize(hrs_9I = mean(hrs_9I, na.rm = TRUE), n = n())
+```
+
+Until the late 1930s, all games were played in the afternoon. By the mid 1970s day games were primarily on weekends. While there might be a different dynamic to paying in the afternoon (*it's hot - let's get out of here!*), the data doesn't bear that out. The advent of night games is not associated with longer games.
+
+```{r}
+SF <- 50 # scaling factor for sec.axis.
+day_night %>%
+  ggplot(aes(x = season)) +
+  geom_col(aes(y = n / SF, fill = day_ind), alpha = 0.2, width = 1.0) +
+  geom_line(aes(y = hrs_9I, color = day_ind), linewidth = 1) +
+  scale_color_manual(values = as.character(pal$cle)) +
+  scale_fill_manual(values = as.character(pal$cle)) +
+  scale_x_continuous(breaks = seq(1900, 2030, 10)) +
+  scale_y_continuous(limits = c(0, NA), n.breaks = 4, labels = pretty_hm,
+    sec.axis = sec_axis(trans = ~ .x * SF, labels = comma_format(), name = "Games Played")
+  ) +
+  coord_cartesian(xlim = c(1900, 2030), ylim = c(0, 3.5)) +
+  labs(x = NULL, y = "Hours", color = NULL, fill = NULL,
+       title = "Night games are more common, but they're not longer.",
+       subtitle = "Cleveland Indians average game duration, with periods of growth and stability.",
+       caption = "source: www.baseball-reference.com.") +
+  theme(
+    legend.position = "top",
+    axis.title.y.right = element_text(margin = margin(l = 5))
+  )
+```
+

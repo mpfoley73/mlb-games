@@ -184,38 +184,49 @@ game_logs_1 <- game_logs_0 %>%
     dur = duration(minutes_game_ct, units = "minutes")
   )
 
+# The pitching change event_id attaches to the prior at bat. A mid-inn
 pitcher_chgs <- dbGetQuery(
   retrosheet_conn,
   "select
     e.game_id,
 	  sum(case when e.inn_pa_ct > 0 then 1 else 0 end) as mid_inning_pitcher_sub_ct 
   from (select game_id, event_id, inn_pa_ct from retrosheet.game_event) e
-	  inner join (select game_id, event_id from retrosheet.player_sub where removed_fld_cd = 1) s
-      on e.game_id = s.game_id and e.event_id = s.event_id 
+	  inner join (select game_id, event_id + 1 as event_id from retrosheet.player_sub where removed_fld_cd = 1) s
+      on e.game_id = s.game_id and e.event_id = s.event_id
   group by e.game_id"
 )
 
 pitches <- dbGetQuery(
   retrosheet_conn,
-  "select game_id, sum(balls_ct) as balls, sum(strikes_ct) as strikes 
+  "select game_id, sum(pa_ball_ct) as balls, sum(pa_strike_ct) as strikes
    from game_event
    group by game_id"
 )
 
-# pa <- dbGetQuery(
-#   retrosheet_conn,
-#   "select game_id, max(game_pa_ct) as pa_ct from game_event group by game_id"
-# )
-
 game_logs <- game_logs_1 %>%
   left_join(pitcher_chgs, by = join_by(game_id)) %>%
   left_join(pitches, by = join_by(game_id)) %>%
-  mutate(
-    balls = if_else(balls == 0, NA_real_, balls),
-    strikes = if_else(strikes == 0, NA_real_, strikes)
-  ) %>%
+  mutate(pitches = balls + strikes) %>%
   replace_na(list(mid_inning_pitcher_subs = 0))
 
 # Save final data frame.
 #
 saveRDS(game_logs, file.path("data", "retro_event.rds"))
+
+
+# x2 <- dbGetQuery(
+#   retrosheet_conn,
+#   "select *
+#   from (select game_id, event_id, inn_pa_ct from retrosheet.game_event where game_id = 'CLE202204150') e
+# 	  inner join (select * from retrosheet.player_sub where removed_fld_cd = 1 and game_id = 'CLE202204150') s
+#       on e.game_id = s.game_id and e.event_id = s.event_id + 1"
+# )
+# 
+# y <- dbGetQuery(retrosheet_conn, "select * from retrosheet.game_event where game_id = 'CLE202204150'")
+# 
+# x2
+# 
+# y %>% filter(inn_ct %in% 7) %>% select(event_id, inn_ct, outs_ct, pit_id, leadoff_fl, game_pa_ct, inn_pa_ct)
+# 
+# y %>% filter(inn_ct == 7)
+# y %>% filter(event_id == 46)
