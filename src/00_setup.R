@@ -6,7 +6,7 @@ pal$cle <- c("B" = "#0C2340", "R" = "#E31937")
 pal$oak <- c("Y" = "#efb21e", "G" = "#003831")
 pal$sfg <- c("O" = "#fd5a1e", "B" = "#27251f", "C" = "#efd19f", "T" = "#ae8f6f")
 pal$old <- c("dust" = "#CBBCB1", "dirt" = "#AF6B58", "grass" = "#556052", "plate" = "#F2EFEA")
-pal$mlb <- as.character(c(pal$cle, pal$oak["Y"], pal$sfg["O"], pal$old[2:3]))
+pal$mlb <- as.character(c(pal$cle, pal$oak, pal$sfg["O"], pal$old[2:3]))
 # names(all_colors) <- NULL
 
 # Instead of typing this out for every ggplot.
@@ -31,7 +31,7 @@ pretty_hm <- function(hrs, verbose = FALSE) {
   if(verbose) {
     my_str <- paste(hour(my_datetime), "hours", minute(my_datetime), "minutes")
   } else {
-    my_str <- format(my_datetime, "%H:%M")
+    my_str <- format(my_datetime, "%k:%M")
   }
   my_str
 }

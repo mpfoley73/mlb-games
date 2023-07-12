@@ -191,7 +191,9 @@ pitcher_chgs <- dbGetQuery(
     e.game_id,
 	  sum(case when e.inn_pa_ct > 0 then 1 else 0 end) as mid_inning_pitcher_sub_ct 
   from (select game_id, event_id, inn_pa_ct from retrosheet.game_event) e
-	  inner join (select game_id, event_id + 1 as event_id from retrosheet.player_sub where removed_fld_cd = 1) s
+	  inner join (select game_id, event_id + 1 as event_id 
+	              from retrosheet.player_sub 
+	              where removed_fld_cd = 1 and sub_fld_cd = 1) s
       on e.game_id = s.game_id and e.event_id = s.event_id
   group by e.game_id"
 )
@@ -212,21 +214,3 @@ game_logs <- game_logs_1 %>%
 # Save final data frame.
 #
 saveRDS(game_logs, file.path("data", "retro_event.rds"))
-
-
-# x2 <- dbGetQuery(
-#   retrosheet_conn,
-#   "select *
-#   from (select game_id, event_id, inn_pa_ct from retrosheet.game_event where game_id = 'CLE202204150') e
-# 	  inner join (select * from retrosheet.player_sub where removed_fld_cd = 1 and game_id = 'CLE202204150') s
-#       on e.game_id = s.game_id and e.event_id = s.event_id + 1"
-# )
-# 
-# y <- dbGetQuery(retrosheet_conn, "select * from retrosheet.game_event where game_id = 'CLE202204150'")
-# 
-# x2
-# 
-# y %>% filter(inn_ct %in% 7) %>% select(event_id, inn_ct, outs_ct, pit_id, leadoff_fl, game_pa_ct, inn_pa_ct)
-# 
-# y %>% filter(inn_ct == 7)
-# y %>% filter(event_id == 46)
