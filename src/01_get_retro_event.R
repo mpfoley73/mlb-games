@@ -209,7 +209,9 @@ game_logs <- game_logs_1 %>%
   left_join(pitcher_chgs, by = join_by(game_id)) %>%
   left_join(pitches, by = join_by(game_id)) %>%
   mutate(pitches = balls + strikes) %>%
-  replace_na(list(mid_inning_pitcher_subs = 0))
+  replace_na(list(mid_inning_pitcher_sub_ct = 0))
+
+skimr::skim(game_logs)
 
 # Save final data frame.
 #
